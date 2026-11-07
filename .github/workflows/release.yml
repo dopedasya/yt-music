@@ -94,6 +94,15 @@ jobs:
       - name: libclang 18
         run: sudo apt-get update && sudo apt-get install -y libclang-18-dev
 
+      # The Gradle project calls `cargo tauri ...`; route that to the npm CLI instead of
+      # compiling tauri-cli (cargo passes the subcommand name "tauri" as $1).
+      - name: cargo-tauri shim
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/bin/sh\nshift\nexec npx --yes @tauri-apps/cli@2 "$@"\n' > "$HOME/.local/bin/cargo-tauri"
+          chmod +x "$HOME/.local/bin/cargo-tauri"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Signing key
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

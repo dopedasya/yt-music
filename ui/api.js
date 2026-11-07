@@ -64,4 +64,8 @@ export const api = {
   syncAccount: () => invoke('sync_account'),
   remotePlaylists: () => invoke('remote_playlists'),
   installYtdlp: () => invoke('install_ytdlp'),
+
+  // Updates (desktop: verified self-update; Android: opens the new APK)
+  checkUpdate: () => invoke('check_update'),
+  installUpdate: () => invoke('install_update'),
 };

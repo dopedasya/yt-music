@@ -451,6 +451,14 @@ const views = {
         <h2>${esc(t('set.playback'))}</h2>
         <label class="check"><input type="checkbox" id="autoplay" ${player.autoplay ? 'checked' : ''}> ${esc(t('set.autoplay'))}</label>
       </section>
+      <section class="set-block">
+        <h2>${esc(t('upd.title'))}</h2>
+        <p id="upd-status" class="muted">${esc(updateStatusText())}</p>
+        <div class="row">
+          <button class="pill-btn" data-act="check-update">${icon('sync')} ${esc(t('upd.check'))}</button>
+          ${upd.info?.available ? `<button class="pill-btn primary" data-act="install-update">${esc(t(upd.info.kind === 'apk' ? 'upd.apk' : 'upd.install'))}</button>` : ''}
+        </div>
+      </section>
       ${s.ytdlp_supported === false ? '' : `<section class="set-block">
         <h2>${esc(t('set.ytdlp'))}</h2>
         <p class="muted small">${esc(t('set.ytdlpHint'))}</p>
@@ -693,6 +701,13 @@ const actions = {
   'new-playlist': () => newPlaylist(),
   'radio-artist': () => { if (pageTracks[0]) startRadio(pageTracks[0]); },
   'q-remove': (el) => { player.removeAt(Number(el.closest('.qrow').dataset.qidx)); },
+  'check-update': async (el) => {
+    el.disabled = true;
+    $('#upd-status').textContent = t('upd.checking');
+    await checkForUpdate(true);
+    render();
+  },
+  'install-update': () => installUpdate(),
   'google-login': async (el) => {
     el.disabled = true;
     el.querySelector('span').textContent = t('set.googleWaiting');
@@ -985,6 +1000,57 @@ listen('download-progress', (p) => {
   });
 });
 
+// ---------------------------------------------------------------- updates
+const upd = { info: null, error: null, busy: false };
+
+function updateStatusText() {
+  const i = upd.info;
+  if (upd.error) return t('upd.fail', { e: upd.error });
+  if (!i) return '';
+  return i.available ? t('upd.available', { v: i.version, cur: i.current }) : t('upd.latest', { v: i.current });
+}
+
+function showUpdateButton() {
+  const b = $('#update-btn');
+  const i = upd.info;
+  b.classList.toggle('hidden', !i?.available);
+  if (i?.available && !upd.busy) b.textContent = t('upd.short', { v: i.version });
+}
+
+async function checkForUpdate(loud = false) {
+  try {
+    upd.info = await api.checkUpdate();
+    upd.error = null;
+  } catch (e) {
+    upd.error = errText(e);
+    if (loud) toast(t('upd.fail', { e: upd.error }), 'err');
+  }
+  showUpdateButton();
+}
+
+async function installUpdate() {
+  if (upd.busy || !upd.info?.available) return;
+  upd.busy = true;
+  const b = $('#update-btn');
+  b.disabled = true;
+  b.textContent = t('upd.downloading', { p: 0 });
+  try {
+    await api.installUpdate(); // desktop: app restarts when done; Android: browser opens the APK
+    if (upd.info.kind === 'apk') toast(t('upd.apkHint'));
+  } catch (e) {
+    toast(t('upd.fail', { e: errText(e) }), 'err');
+  } finally {
+    upd.busy = false;
+    b.disabled = false;
+    showUpdateButton();
+  }
+}
+
+listen('update-progress', (p) => {
+  const pct = p.total ? Math.round((p.downloaded / p.total) * 100) : 0;
+  $('#update-btn').textContent = t('upd.downloading', { p: pct });
+});
+
 listen('google-login', async (r) => {
   if (r.ok) {
     toast(t('toast.loggedIn'));
@@ -1009,4 +1075,6 @@ listen('google-login-closed', () => { if (nav.stack[nav.pos]?.view === 'settings
   await player.restore().catch((e) => console.error(e));
   updateNowPlaying();
   go('home');
+  // Quietly look for a new version a few seconds after start.
+  setTimeout(() => checkForUpdate(false), 4000);
 })();

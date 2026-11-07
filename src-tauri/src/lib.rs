@@ -10,6 +10,7 @@ mod playback;
 mod player;
 mod server;
 mod state;
+mod update;
 mod vault;
 mod yt;
 mod ytdlp;
@@ -21,7 +22,10 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .setup(|app| {
             // YTUBEM_DATA_DIR isolates automated test runs from the user's real library.
             let data_dir = match std::env::var_os("YTUBEM_DATA_DIR") {
@@ -112,6 +116,8 @@ pub fn run() {
             playback::player_cycle_repeat,
             playback::player_set_autoplay,
             auth::google_login,
+            update::check_update,
+            update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running YT Music");

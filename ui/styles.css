@@ -455,3 +455,7 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 4px; font-size:
 .seg-opt input { position: absolute; left: 14px; top: 15px; accent-color: var(--accent); width: 16px; height: 16px; }
 .seg-opt small { color: var(--muted); }
 .seg-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--hover)); }
+
+/* ------------------------------------------------------------ update button */
+.update-btn { background: var(--accent); border-color: var(--accent); color: #fff; margin-right: 8px; animation: tin .3s ease-out; }
+.update-btn:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }

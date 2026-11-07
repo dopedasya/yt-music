@@ -80,6 +80,11 @@ const D = {
     'lyrics.notSynced': 'Not time-synced', 'lyrics.source': 'Lyrics: {src}',
     'quality.offline': 'Playing your offline copy', 'quality.stream': 'Streaming quality',
     'toast.googleFail': 'Google sign-in failed: {e}',
+    'upd.title': 'Updates', 'upd.check': 'Check for updates', 'upd.checking': 'Checking…',
+    'upd.latest': 'You have the latest version ({v}).', 'upd.available': 'Version {v} is available (you have {cur}).',
+    'upd.install': 'Update and restart', 'upd.apk': 'Download update', 'upd.short': 'Update to {v}',
+    'upd.downloading': 'Updating… {p}%', 'upd.fail': 'Update check failed: {e}',
+    'upd.apkHint': 'Open the downloaded APK to install the update.',
   },
 
   uk: {
@@ -160,6 +165,11 @@ const D = {
     'lyrics.notSynced': 'Без синхронізації', 'lyrics.source': 'Текст: {src}',
     'quality.offline': 'Грає завантажена копія', 'quality.stream': 'Якість стріму',
     'toast.googleFail': 'Не вдалося увійти через Google: {e}',
+    'upd.title': 'Оновлення', 'upd.check': 'Перевірити оновлення', 'upd.checking': 'Перевіряю…',
+    'upd.latest': 'У тебе остання версія ({v}).', 'upd.available': 'Доступна версія {v} (у тебе {cur}).',
+    'upd.install': 'Оновити й перезапустити', 'upd.apk': 'Завантажити оновлення', 'upd.short': 'Оновити до {v}',
+    'upd.downloading': 'Оновлюю… {p}%', 'upd.fail': 'Не вдалося перевірити оновлення: {e}',
+    'upd.apkHint': 'Відкрий завантажений APK, щоб встановити оновлення.',
   },
 
   ru: {
@@ -240,6 +250,11 @@ const D = {
     'lyrics.notSynced': 'Без синхронизации', 'lyrics.source': 'Текст: {src}',
     'quality.offline': 'Играет скачанная копия', 'quality.stream': 'Качество стрима',
     'toast.googleFail': 'Не удалось войти через Google: {e}',
+    'upd.title': 'Обновления', 'upd.check': 'Проверить обновления', 'upd.checking': 'Проверяю…',
+    'upd.latest': 'У тебя последняя версия ({v}).', 'upd.available': 'Доступна версия {v} (у тебя {cur}).',
+    'upd.install': 'Обновить и перезапустить', 'upd.apk': 'Скачать обновление', 'upd.short': 'Обновить до {v}',
+    'upd.downloading': 'Обновляю… {p}%', 'upd.fail': 'Не удалось проверить обновления: {e}',
+    'upd.apkHint': 'Открой скачанный APK, чтобы установить обновление.',
   },
 };
 

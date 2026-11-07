@@ -22,6 +22,9 @@ const tracksLabel = (n) => t('tracks', { n });
 const kindLabel = (k) => (k ? t(`kind.${k}`) : '');
 const compact = (n) => new Intl.NumberFormat(locale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 const subsLabel = (n) => (n == null ? '' : t('subscribers', { n: compact(n) }));
+const regionName = (code) => {
+  try { return new Intl.DisplayNames([locale()], { type: 'region' }).of(code) || code; } catch { return code; }
+};
 const qualityLabel = (codec, kbps) => [codec, kbps ? `${kbps} kbps` : ''].filter(Boolean).join(' · ');
 const GOOGLE_G = '<svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.2C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.4-4.6 7l7.1 5.5c4.2-3.9 7.2-9.6 7.2-17z"/><path fill="#FBBC05" d="M10.5 28.6A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.6l-7.9-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.1-5.5c-2 1.4-4.6 2.2-8.8 2.2-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 const artistLinks = (artists = []) => artists.map((a) =>
@@ -419,6 +422,11 @@ const views = {
         <div class="row"><select id="lang-select" class="text-in select">
           ${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${esc(v)}</option>`).join('')}
         </select></div>
+        <h2 class="sub-h">${esc(t('set.region'))}</h2>
+        <p class="muted small">${esc(t('set.regionHint'))}</p>
+        <div class="row"><select id="region-select" class="text-in select">
+          ${['US', 'GB', 'DE', 'FR', 'PL', 'UA'].map((c) => `<option value="${c}" ${c === s.chart_region ? 'selected' : ''}>${esc(regionName(c))}</option>`).join('')}
+        </select></div>
       </section>
       <section class="set-block">
         <h2>${esc(t('set.account'))}</h2>
@@ -474,6 +482,9 @@ const afterRender = {
   lyrics() { syncLyrics(true); },
   settings() {
     $('#lang-select')?.addEventListener('change', (e) => setLang(e.target.value));
+    $('#region-select')?.addEventListener('change', async (e) => {
+      try { await api.setChartRegion(e.target.value); toast(t('toast.settingsSaved')); } catch (err) { toast(errText(err), 'err'); }
+    });
     $('#cookie-file')?.addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (f) $('#cookie-text').value = await f.text();

@@ -459,3 +459,5 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 4px; font-size:
 /* ------------------------------------------------------------ update button */
 .update-btn { background: var(--accent); border-color: var(--accent); color: #fff; margin-right: 8px; animation: tin .3s ease-out; }
 .update-btn:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+
+.settings .sub-h { font-size: 16px; margin-top: 20px; }

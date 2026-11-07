@@ -155,12 +155,21 @@ fn pick_audio(streams: &[AudioStream], codec: Codec) -> Option<&AudioStream> {
         .or_else(|| usable().max_by_key(|s| s.bitrate))
 }
 
+/// Parse a two-letter country code into rustypipe's `Country` (serialized as e.g. "US").
+fn serde_plain_country(code: &str) -> Result<rustypipe::param::Country> {
+    Ok(serde_json::from_value(serde_json::Value::String(code.to_uppercase()))?)
+}
+
 impl Yt {
     pub fn new(storage: PathBuf, ytdlp_dir: PathBuf) -> Result<Self> {
-        let rp = RustyPipe::builder()
-            .storage_dir(storage)
-            .timeout(Duration::from_secs(20))
-            .build()?;
+        let mut b = RustyPipe::builder().storage_dir(storage).timeout(Duration::from_secs(20));
+        // YTUBEM_COUNTRY (e.g. "US") overrides the region used for charts/new releases.
+        if let Ok(c) = std::env::var("YTUBEM_COUNTRY")
+            && let Ok(country) = serde_plain_country(&c)
+        {
+            b = b.country(country);
+        }
+        let rp = b.build()?;
         let http = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
         Ok(Self { rp, http, streams: Mutex::new(HashMap::new()), ytdlp_dir })
     }
@@ -193,9 +202,10 @@ impl Yt {
         Ok(self.rp.query().music_search_suggestion(q).await?.terms)
     }
 
-    pub async fn home(&self) -> Result<Home> {
+    /// Home feed. Charts follow chart_region (e.g. "US"); new releases follow YouTube's own geo.
+    pub async fn home(&self, chart_region: &str) -> Result<Home> {
         let qr = self.rp.query();
-        let (charts, new) = tokio::join!(qr.music_charts(None), qr.music_new_albums());
+        let (charts, new) = tokio::join!(qr.music_charts(serde_plain_country(chart_region).ok()), qr.music_new_albums());
         let mut sections = Vec::new();
         if let Ok(n) = new
             && !n.is_empty()
@@ -537,7 +547,7 @@ mod live_tests {
         println!("artist: {} top={} albums={} singles={}", ar.name, ar.tracks.len(), ar.albums.len(), ar.singles.len());
         println!("radio: {}", yt.radio(&t.id).await.unwrap().len());
         println!("lyrics: {}", yt.lyrics(&t.id).await.unwrap().is_some());
-        let home = yt.home().await.unwrap();
+        let home = yt.home("US").await.unwrap();
         println!("home: {:?}", home.sections.iter().map(|s| &s.title).collect::<Vec<_>>());
         let pl = yt.playlist(&r.playlists[0].id, false).await.unwrap();
         println!("playlist: {} tracks={}", pl.title, pl.tracks.len());

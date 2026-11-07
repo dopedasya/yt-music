@@ -32,7 +32,21 @@ pub async fn search_suggestions(core: St<'_>, query: String) -> Res<Vec<String>>
 
 #[tauri::command]
 pub async fn home(core: St<'_>) -> Res<Home> {
-    core.yt.home().await.map_err(e)
+    core.yt.home(&chart_region(&core)).await.map_err(e)
+}
+
+/// Region for charts on the home page; US by default.
+fn chart_region(core: &Core) -> String {
+    core.db.get_setting("chart_region").unwrap_or_else(|| "US".into())
+}
+
+#[tauri::command]
+pub fn set_chart_region(core: St, region: String) -> Res<()> {
+    const ALLOWED: [&str; 6] = ["US", "GB", "DE", "FR", "PL", "UA"];
+    if !ALLOWED.contains(&region.as_str()) {
+        return Err("unsupported region".into());
+    }
+    core.db.set_setting("chart_region", &region).map_err(e)
 }
 
 #[tauri::command]
@@ -235,6 +249,7 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
             Codec::Opus => "opus".into(),
         },
         google_login_supported: cfg!(desktop),
+        chart_region: chart_region(&core),
     })
 }
 

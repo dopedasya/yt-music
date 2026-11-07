@@ -58,6 +58,7 @@ export const api = {
   settings: () => invoke('get_settings'),
   setDownloadDir: (path) => invoke('set_download_dir', { path }),
   setDownloadQuality: (quality) => invoke('set_download_quality', { quality }),
+  setChartRegion: (region) => invoke('set_chart_region', { region }),
   googleLogin: () => invoke('google_login'),
   login: (text) => invoke('login_cookies', { text }),
   logout: () => invoke('logout'),

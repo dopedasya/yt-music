@@ -160,6 +160,8 @@ pub struct Settings {
     pub download_quality: String,
     /// The Google sign-in window is desktop-only for now.
     pub google_login_supported: bool,
+    /// Country code used for charts ("US", "GB", ...).
+    pub chart_region: String,
 }
 
 #[derive(Serialize)]

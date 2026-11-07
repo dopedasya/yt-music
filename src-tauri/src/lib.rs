@@ -99,6 +99,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_download_dir,
             commands::set_download_quality,
+            commands::set_chart_region,
             commands::login_cookies,
             commands::logout,
             commands::sync_account,

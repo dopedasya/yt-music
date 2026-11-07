@@ -14,7 +14,7 @@
 
 <details><summary>Ще скріншоти</summary>
 
-![Головна](docs/screenshots/home.png)
+![Виконавець](docs/screenshots/artist.png)
 ![Пошук](docs/screenshots/search.png)
 
 </details>

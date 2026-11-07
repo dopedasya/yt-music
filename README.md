@@ -14,7 +14,7 @@ A fast, unofficial YouTube Music desktop client written in Rust (Tauri 2). Searc
 
 <details><summary>More screenshots</summary>
 
-![Home](docs/screenshots/home.png)
+![Artist](docs/screenshots/artist.png)
 ![Search](docs/screenshots/search.png)
 
 </details>

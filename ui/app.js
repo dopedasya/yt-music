@@ -111,7 +111,7 @@ async function render() {
     if (token !== renderToken) return;
     console.error(e);
     el.innerHTML = `<div class="empty"><h2>${esc(t('err.title'))}</h2><p>${esc(errText(e))}</p>
-      <button class="pill-btn" onclick="location.reload()">${esc(t('err.reload'))}</button></div>`;
+      <button class="pill-btn" data-act="reload">${esc(t('err.reload'))}</button></div>`;
   }
 }
 
@@ -135,7 +135,7 @@ function trackRows(tracks, opts = {}) {
     return `<div class="trow ${x.id === cur ? 'playing' : ''}" data-list="${lid}" data-idx="${i}" data-tid="${esc(x.id)}">
       <div class="tnum"><span class="n">${opts.numbers === false ? '' : i + 1}</span><span class="eq"><b></b><b></b><b></b></span>${icon('play', 'pl')}</div>
       <div class="tmain">
-        ${opts.covers === false ? '' : `<img class="tcover" loading="lazy" src="${esc(x.cover || '')}" alt="" onerror="this.style.visibility='hidden'">`}
+        ${opts.covers === false ? '' : `<img class="tcover" loading="lazy" src="${esc(x.cover || '')}" alt="" data-onerr="hide">`}
         <div class="ttext"><div class="ttitle">${esc(x.title)}</div><div class="tartist">${dlIcon}${opts.badges?.[x.id] ? `<span class="qbadge">${esc(opts.badges[x.id])}</span>` : ''}${artistLinks(x.artists)}</div></div>
       </div>
       ${opts.album === false ? '' : `<div class="talbum">${x.album ? `<a class="link" data-go="album" data-id="${esc(x.album.id)}">${esc(x.album.name)}</a>` : ''}</div>`}
@@ -160,7 +160,7 @@ function card(kind, item) {
   if (kind === 'artist') sub = item.subscribers != null ? subsLabel(item.subscribers) : t('kind.artist');
   if (kind === 'local') sub = tracksLabel(item.count || 0);
   const cover = item.cover
-    ? `<img loading="lazy" src="${esc(item.cover)}" alt="" onerror="this.remove()">`
+    ? `<img loading="lazy" src="${esc(item.cover)}" alt="" data-onerr="remove">`
     : `<div class="ph">${icon(kind === 'artist' ? 'user' : 'music')}</div>`;
   return `<div class="card" data-go="${kind === 'local' ? 'local-playlist' : kind}" data-id="${esc(item.id)}">
     <div class="card-art ${round ? 'round' : ''}">${cover}
@@ -719,6 +719,7 @@ const actions = {
     render();
   },
   'install-update': () => installUpdate(),
+  reload: () => location.reload(),
   'google-login': async (el) => {
     el.disabled = true;
     el.querySelector('span').textContent = t('set.googleWaiting');
@@ -770,6 +771,13 @@ function trackFromEl(el) {
 }
 
 // ---------------------------------------------------------------- global events
+// Broken cover images (CSP forbids inline onerror=, so handle it here; errors don't bubble).
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement)) return;
+  if (img.dataset.onerr === 'remove') img.remove();
+  else if (img.dataset.onerr === 'hide') img.style.visibility = 'hidden';
+}, true);
 document.addEventListener('click', (e) => {
   const act = e.target.closest('[data-act]');
   if (act) { e.stopPropagation(); actions[act.dataset.act]?.(act, e); return; }

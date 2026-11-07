@@ -11,7 +11,18 @@ permissions:
 # Third-party actions are pinned to full commit SHAs (supply-chain safety:
 # the android job handles the release signing key). Comments show the version.
 jobs:
+  # Fail fast if any frontend module doesn't even parse (it would ship a blank UI).
+  check-ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Syntax-check ui/*.js as ES modules
+        run: |
+          t="$(mktemp -d)"
+          for f in ui/*.js; do cp "$f" "$t/$(basename "${f%.js}").mjs"; node --check "$t/$(basename "${f%.js}").mjs"; done
+
   build:
+    needs: check-ui
     # Manual runs (workflow_dispatch) only check the Android build.
     if: startsWith(github.ref, 'refs/tags/')
     strategy:

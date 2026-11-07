@@ -30,11 +30,16 @@ tokio = { version = "1.54.1", features = ["full"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs"] }
 url = "2.5.8"
+chacha20poly1305 = "0.10"
 
 # rquickjs-sys (pulled in by rustypipe) ships no prebuilt bindings for Android;
 # generate them with bindgen there. Needs libclang (LIBCLANG_PATH) at build time.
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs-sys = { version = "0.9", features = ["bindgen"] }
+
+# OS secret store for keys: Windows Credential Manager / macOS Keychain.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
 
 # Self-update (download, verify signature, install, restart) on desktop only;
 # Android updates by downloading the new APK.

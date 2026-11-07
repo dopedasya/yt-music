@@ -161,8 +161,14 @@ fn serde_plain_country(code: &str) -> Result<rustypipe::param::Country> {
 }
 
 impl Yt {
-    pub fn new(storage: PathBuf, ytdlp_dir: PathBuf) -> Result<Self> {
-        let mut b = RustyPipe::builder().storage_dir(storage).timeout(Duration::from_secs(20));
+    /// `session_key` encrypts rustypipe's cache (it holds the YouTube login session).
+    pub fn new(storage: PathBuf, ytdlp_dir: PathBuf, session_key: &crate::secrets::Key) -> Result<Self> {
+        std::fs::create_dir_all(&storage)?;
+        let secure = crate::secure_store::SecureStorage::new(storage.clone(), session_key);
+        let mut b = RustyPipe::builder()
+            .storage_dir(storage)
+            .storage(Box::new(secure))
+            .timeout(Duration::from_secs(20));
         // YTUBEM_COUNTRY (e.g. "US") overrides the region used for charts/new releases.
         if let Ok(c) = std::env::var("YTUBEM_COUNTRY")
             && let Ok(country) = serde_plain_country(&c)
@@ -535,7 +541,7 @@ mod live_tests {
     #[ignore]
     async fn live_smoke() {
         let dir = std::env::temp_dir().join("ytubem-test");
-        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let yt = Yt::new(dir.join("rp"), dir.join("bin"), &[0u8; 32]).unwrap();
         let r = yt.search("Океан Ельзи").await.unwrap();
         println!("tracks={} albums={} artists={} playlists={}", r.tracks.len(), r.albums.len(), r.artists.len(), r.playlists.len());
         let t = &r.tracks[0];
@@ -567,7 +573,7 @@ mod native_tests {
     #[ignore]
     async fn live_native_stream() {
         let dir = std::env::temp_dir().join("ytubem-test");
-        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let yt = Yt::new(dir.join("rp"), dir.join("bin"), &[0u8; 32]).unwrap();
         let c = reqwest::Client::new();
         for id in ["8wWrzr3_46Y", "1BdGqKO3ERY", "dQw4w9WgXcQ"] {
             let t = Instant::now();

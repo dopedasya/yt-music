@@ -80,7 +80,7 @@ const D = {
     'lyrics.notSynced': 'Not time-synced', 'lyrics.source': 'Lyrics: {src}',
     'quality.offline': 'Playing your offline copy', 'quality.stream': 'Streaming quality',
     'toast.googleFail': 'Google sign-in failed: {e}',
-    'set.region': 'Charts region', 'set.regionHint': 'Which country''s charts to show on Home.',
+    'set.region': 'Charts region', 'set.regionHint': 'Choose the country for Home charts.',
     'upd.title': 'Updates', 'upd.check': 'Check for updates', 'upd.checking': 'Checking…',
     'upd.latest': 'You have the latest version ({v}).', 'upd.available': 'Version {v} is available (you have {cur}).',
     'upd.install': 'Update and restart', 'upd.apk': 'Download update', 'upd.short': 'Update to {v}',

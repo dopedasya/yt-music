@@ -25,16 +25,23 @@ pub const EXT: &str = "ytmc";
 pub struct Key([u8; 32]);
 
 impl Key {
+    pub fn from_raw(k: [u8; 32]) -> Self {
+        Key(k)
+    }
+
+    #[cfg(test)]
     pub fn generate() -> Result<Self> {
         let mut k = [0u8; 32];
         getrandom::fill(&mut k).map_err(|e| anyhow!("rng: {e}"))?;
         Ok(Key(k))
     }
 
+    #[cfg(test)]
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    #[cfg(test)]
     pub fn from_hex(s: &str) -> Result<Self> {
         if s.len() != 64 {
             bail!("bad key length");

@@ -19,7 +19,16 @@ pub struct Core {
     pub download_slots: Semaphore,
     pub downloading: Mutex<HashSet<String>>,
     pub queue: tokio::sync::Mutex<Queue>,
+    /// Random per-run secret in every stream URL, so other programs on the machine can't
+    /// use the local server (e.g. to pull decrypted offline tracks).
+    pub stream_token: String,
     vault_key: Mutex<Option<vault::Key>>,
+}
+
+fn random_token() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("system rng");
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 impl Core {
@@ -38,6 +47,7 @@ impl Core {
             download_slots: Semaphore::new(3),
             downloading: Default::default(),
             queue: tokio::sync::Mutex::new(queue),
+            stream_token: random_token(),
             vault_key: Mutex::new(None),
         }
     }
@@ -61,20 +71,23 @@ impl Core {
         self.data_dir.join("bin")
     }
 
-    /// Per-install key for the offline vault, created on first use.
+    /// Per-install key for the offline vault, kept in the OS secret store.
+    /// v0.3.0–0.3.2 stored it in the DB; it is moved over once and removed from the DB.
     pub fn vault_key(&self) -> Result<vault::Key> {
         let mut slot = self.vault_key.lock().unwrap();
         if let Some(k) = slot.as_ref() {
             return Ok(k.clone());
         }
-        let key = match self.db.get_setting("vault_key") {
-            Some(hex) => vault::Key::from_hex(&hex)?,
-            None => {
-                let k = vault::Key::generate()?;
-                self.db.set_setting("vault_key", &k.to_hex())?;
-                k
+        let legacy = self.db.get_setting("vault_key").and_then(|h| crate::secrets::from_hex(&h).ok());
+        let raw = crate::secrets::get_or_create(&self.data_dir, "vault", legacy)?;
+        if legacy.is_some() {
+            if legacy == Some(raw) {
+                self.db.del_setting("vault_key")?;
+            } else {
+                anyhow::bail!("vault key mismatch between DB and secret store");
             }
-        };
+        }
+        let key = vault::Key::from_raw(raw);
         *slot = Some(key.clone());
         Ok(key)
     }
@@ -86,7 +99,7 @@ pub fn test_core() -> std::sync::Arc<Core> {
     std::fs::create_dir_all(&dir).unwrap();
     std::sync::Arc::new(Core::new(
         Db::open(&dir.join("test.db")).unwrap(),
-        Yt::new(dir.join("rp"), dir.join("bin")).unwrap(),
+        Yt::new(dir.join("rp"), dir.join("bin"), &[0u8; 32]).unwrap(),
         reqwest::Client::new(),
         dir.clone(),
         dir.join("dl"),

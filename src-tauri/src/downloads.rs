@@ -54,13 +54,26 @@ pub fn file_for(dir: &Path, id: &str) -> PathBuf {
     dir.join(name).with_extension(vault::EXT)
 }
 
-async fn download_one(core: &Core, t: &Track, progress: impl Fn(f32)) -> Result<()> {
+async fn download_one(core: &Core, t: &Track, progress: impl Fn(f32) + Sync) -> Result<()> {
     let dir = core.download_dir();
     tokio::fs::create_dir_all(&dir).await.context("couldn't create the download folder")?;
-    let info = core.yt.stream(&t.id, core.download_codec()).await?;
     let dest = file_for(&dir, &t.id);
     let key = core.vault_key()?;
-    fetch_encrypted(core, &info.url, info.size, &info.mime, &key, &dest, progress).await?;
+    // googlevideo occasionally refuses a freshly issued URL (403); like the playback
+    // proxy, drop the cached URL and try once more with a new one.
+    let mut attempt = 0;
+    let info = loop {
+        let info = core.yt.stream(&t.id, core.download_codec()).await?;
+        match fetch_encrypted(core, &info.url, info.size, &info.mime, &key, &dest, &progress).await {
+            Ok(()) => break info,
+            Err(e) if attempt == 0 => {
+                eprintln!("download {} attempt 1 failed ({e:#}); retrying with a fresh URL", t.id);
+                core.yt.invalidate(&t.id);
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    };
     let size = tokio::fs::metadata(&dest).await?.len();
     core.db.add_download(t, &dest.to_string_lossy(), size, info.codec.label(), info.kbps)?;
     Ok(())

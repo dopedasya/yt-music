@@ -16,7 +16,7 @@ fn e<E: std::fmt::Display>(err: E) -> String {
 
 #[tauri::command]
 pub fn stream_base(core: St) -> String {
-    format!("http://127.0.0.1:{}", core.port.load(Ordering::Relaxed))
+    format!("http://127.0.0.1:{}/{}", core.port.load(Ordering::Relaxed), core.stream_token)
 }
 
 // ------------------------------------------------------------- YouTube Music
@@ -110,6 +110,11 @@ pub async fn get_lyrics(core: St<'_>, track: Track) -> Res<Option<lyrics::Lyrics
 /// Accent colour of a cover image (`#rrggbb`), computed in Rust and cached.
 #[tauri::command]
 pub async fn cover_color(core: St<'_>, url: String) -> Res<String> {
+    // Only fetch cover art from Google's image hosts; never arbitrary URLs (no SSRF
+    // into the local network through this command).
+    if !is_cover_url(&url) {
+        return Err("not a cover image URL".into());
+    }
     let key = format!("color:{url}");
     if let Some(c) = core.db.cache_get(&key) {
         return Ok(c);
@@ -118,6 +123,31 @@ pub async fn cover_color(core: St<'_>, url: String) -> Res<String> {
     let c = tokio::task::spawn_blocking(move || color::dominant(&bytes)).await.map_err(e)?.map_err(e)?;
     let _ = core.db.cache_put(&key, &c);
     Ok(c)
+}
+
+fn is_cover_url(u: &str) -> bool {
+    const HOSTS: [&str; 3] = ["googleusercontent.com", "ggpht.com", "ytimg.com"];
+    let Ok(url) = url::Url::parse(u) else { return false };
+    let host = url.host_str().unwrap_or("");
+    url.scheme() == "https"
+        && url.port().is_none()
+        && HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cover_url;
+
+    #[test]
+    fn cover_url_allowlist() {
+        assert!(is_cover_url("https://lh3.googleusercontent.com/abc=w544-h544"));
+        assert!(is_cover_url("https://i.ytimg.com/vi/x/hqdefault.jpg"));
+        assert!(!is_cover_url("http://lh3.googleusercontent.com/abc"), "https only");
+        assert!(!is_cover_url("https://192.168.1.1/admin"));
+        assert!(!is_cover_url("https://evilgoogleusercontent.com/x"));
+        assert!(!is_cover_url("https://googleusercontent.com.evil.io/x"));
+        assert!(!is_cover_url("https://lh3.googleusercontent.com:8443/x"));
+    }
 }
 
 /// Quality of what is (about to be) played: the offline file, or the AAC stream.

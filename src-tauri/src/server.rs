@@ -22,7 +22,7 @@ const CHUNK: u64 = 4 * 1024 * 1024;
 pub async fn start(core: Arc<Core>) -> anyhow::Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
-    let app = Router::new().route("/stream/{id}", get(stream)).with_state(core);
+    let app = Router::new().route("/{token}/stream/{id}", get(stream)).with_state(core);
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             eprintln!("stream server stopped: {e}");
@@ -224,8 +224,13 @@ fn local_host(req: &Request, port: u16) -> bool {
     host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
 }
 
-async fn stream(State(core): State<Arc<Core>>, Path(id): Path<String>, req: Request) -> Response {
-    if !local_host(&req, core.port.load(std::sync::atomic::Ordering::Relaxed)) {
+/// Constant-time comparison so the token can't be guessed byte by byte from timings.
+fn token_ok(given: &str, expected: &str) -> bool {
+    given.len() == expected.len() && given.bytes().zip(expected.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
+async fn stream(State(core): State<Arc<Core>>, Path((token, id)): Path<(String, String)>, req: Request) -> Response {
+    if !token_ok(&token, &core.stream_token) || !local_host(&req, core.port.load(std::sync::atomic::Ordering::Relaxed)) {
         return StatusCode::FORBIDDEN.into_response();
     }
     if !valid_id(&id) {
@@ -306,13 +311,19 @@ mod live_tests {
         let id = core.yt.search("Океан Ельзи Обійми").await.unwrap().tracks[0].id.clone();
         let port = start(core.clone()).await.unwrap();
         core.port.store(port, std::sync::atomic::Ordering::Relaxed);
+        let tok = &core.stream_token;
         // foreign Host header (DNS rebinding) must be refused
         let evil = reqwest::Client::new()
-            .get(format!("http://127.0.0.1:{port}/stream/{id}"))
+            .get(format!("http://127.0.0.1:{port}/{tok}/stream/{id}"))
             .header("Host", format!("evil.example:{port}"))
             .send().await.unwrap();
         assert_eq!(evil.status(), 403);
-        let url = format!("http://127.0.0.1:{port}/stream/{id}");
+        // other local programs without the token must be refused too
+        for bad in ["0000", "stream"] {
+            let r = reqwest::get(format!("http://127.0.0.1:{port}/{bad}/stream/{id}")).await.unwrap();
+            assert_eq!(r.status(), 403, "token {bad}");
+        }
+        let url = format!("http://127.0.0.1:{port}/{tok}/stream/{id}");
         let http = reqwest::Client::new();
         // what Chromium sends first
         let r = http.get(&url).header("Range", "bytes=0-").send().await.unwrap();

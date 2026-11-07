@@ -8,6 +8,8 @@ mod lyrics;
 mod models;
 mod playback;
 mod player;
+mod secrets;
+mod secure_store;
 mod server;
 mod state;
 mod update;
@@ -38,7 +40,8 @@ pub fn run() {
             let default_download_dir = data_dir.join("offline");
 
             let db = db::Db::open(&data_dir.join("library.db"))?;
-            let yt = yt::Yt::new(data_dir.join("rustypipe"), data_dir.join("bin"))?;
+            let session_key = secrets::get_or_create(&data_dir, "session", None)?;
+            let yt = yt::Yt::new(data_dir.join("rustypipe"), data_dir.join("bin"), &session_key)?;
             let http = reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
                 .connect_timeout(std::time::Duration::from_secs(10))

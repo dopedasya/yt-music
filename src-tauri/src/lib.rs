@@ -8,6 +8,7 @@ mod lyrics;
 mod models;
 mod playback;
 mod player;
+mod recommend;
 mod secrets;
 mod secure_store;
 mod server;

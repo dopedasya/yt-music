@@ -12,6 +12,9 @@ use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBu
 const LABEL: &str = "google-login";
 const START: &str = "https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 /// A regular desktop browser UA: Google refuses sign-in in "embedded" browsers it can detect.
+/// Must stay identical to `additionalBrowserArgs` of the main window in tauri.conf.json.
+#[cfg(windows)]
+const MAIN_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --enable-features=HardwareMediaKeyHandling --autoplay-policy=no-user-gesture-required";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0";
 
 #[derive(Clone, serde::Serialize)]
@@ -60,8 +63,16 @@ pub async fn google_login(app: AppHandle, core: State<'_, Arc<Core>>) -> Result<
     let core = core.inner().clone();
     let handler_app = app.clone();
     let url = Url::parse(START).map_err(|e| e.to_string())?;
-    let window = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::External(url));
+    // WebView2 shares one browser process per data folder; every window must use the same
+    // browser arguments as the main window (tauri.conf.json), or creation fails with
+    // 0x8007139F "group or resource is not in the correct state".
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(MAIN_BROWSER_ARGS);
+    let window = builder
         .title("Sign in with Google")
+        // automated tests create it off-screen
+        .visible(std::env::var_os("YTUBEM_HIDDEN").is_none())
         .inner_size(480.0, 720.0)
         .resizable(true)
         .incognito(true)

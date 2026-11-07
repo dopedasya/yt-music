@@ -9,7 +9,7 @@ pub struct Db {
     conn: Mutex<Connection>,
 }
 
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -242,6 +242,35 @@ impl Db {
             [],
         )?;
         Ok(())
+    }
+
+    /// Most played tracks since `since_ms`, with play counts (taste signal for recommendations).
+    pub fn top_played(&self, since_ms: i64, limit: usize) -> Result<Vec<(Track, u32)>> {
+        let conn = self.c();
+        let mut st = conn.prepare(
+            "SELECT t.data, COUNT(*) AS c FROM history h JOIN tracks t ON t.id = h.track_id
+             WHERE h.ts >= ?1 GROUP BY h.track_id ORDER BY c DESC, MAX(h.ts) DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![since_ms, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))?;
+        Ok(rows.filter_map(|r| r.ok()).filter_map(|(d, c)| Some((track_from_json(d)?, c))).collect())
+    }
+
+    /// A random handful of liked tracks.
+    pub fn liked_sample(&self, limit: usize) -> Result<Vec<Track>> {
+        self.tracks_query(
+            "SELECT t.data FROM likes l JOIN tracks t ON t.id = l.track_id ORDER BY RANDOM() LIMIT ?1",
+            [limit as i64],
+        )
+    }
+
+    /// Liked tracks that haven't been played since `since_ms` ("rediscover").
+    pub fn liked_not_played_since(&self, since_ms: i64, limit: usize) -> Result<Vec<Track>> {
+        self.tracks_query(
+            "SELECT t.data FROM likes l JOIN tracks t ON t.id = l.track_id
+             WHERE NOT EXISTS (SELECT 1 FROM history h WHERE h.track_id = l.track_id AND h.ts >= ?1)
+             ORDER BY RANDOM() LIMIT ?2",
+            params![since_ms, limit as i64],
+        )
     }
 
     pub fn history(&self, limit: usize) -> Result<Vec<Track>> {

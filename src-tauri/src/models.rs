@@ -24,7 +24,7 @@ pub struct Track {
     pub cover: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AlbumCard {
     pub id: String,
     pub title: String,
@@ -34,7 +34,7 @@ pub struct AlbumCard {
     pub kind: String,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArtistCard {
     pub id: String,
     pub name: String,
@@ -95,16 +95,18 @@ pub struct PlaylistPage {
     pub tracks: Vec<Track>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct HomeSection {
+    /// i18n key, e.g. "your_mix"; `param` fills `{name}` ("More like {name}").
     pub title: String,
+    pub param: Option<String>,
     pub tracks: Vec<Track>,
     pub albums: Vec<AlbumCard>,
     pub playlists: Vec<PlaylistCard>,
     pub artists: Vec<ArtistCard>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Home {
     pub sections: Vec<HomeSection>,
 }
@@ -160,8 +162,10 @@ pub struct Settings {
     pub download_quality: String,
     /// The Google sign-in window is desktop-only for now.
     pub google_login_supported: bool,
-    /// Country code used for charts ("US", "GB", ...).
+    /// "auto" or a country code used for charts ("US", "GB", ...).
     pub chart_region: String,
+    /// Country detected from the OS regional settings (used when "auto").
+    pub detected_region: String,
 }
 
 #[derive(Serialize)]

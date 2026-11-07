@@ -1,6 +1,6 @@
 [package]
 name = "ytubem"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "Fast unofficial YouTube Music client"
 license = "GPL-3.0-only"
@@ -31,6 +31,7 @@ tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs"] }
 url = "2.5.8"
 chacha20poly1305 = "0.10"
+sys-locale = "0.3"
 
 # rquickjs-sys (pulled in by rustypipe) ships no prebuilt bindings for Android;
 # generate them with bindgen there. Needs libclang (LIBCLANG_PATH) at build time.
@@ -45,6 +46,9 @@ keyring = { version = "3", features = ["windows-native", "apple-native"] }
 # Android updates by downloading the new APK.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

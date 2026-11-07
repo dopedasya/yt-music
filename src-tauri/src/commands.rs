@@ -32,17 +32,61 @@ pub async fn search_suggestions(core: St<'_>, query: String) -> Res<Vec<String>>
 
 #[tauri::command]
 pub async fn home(core: St<'_>) -> Res<Home> {
-    core.yt.home(&chart_region(&core)).await.map_err(e)
+    // "Made for you" first (from your history/likes), then charts for your region.
+    let region = effective_region(&core);
+    let (personal, general) = tokio::join!(crate::recommend::personal(&core), core.yt.home(&region));
+    let mut sections = personal;
+    match general {
+        Ok(h) => sections.extend(h.sections),
+        Err(err) if sections.is_empty() => return Err(e(err)),
+        Err(_) => {}
+    }
+    Ok(Home { sections })
 }
 
-/// Region for charts on the home page; US by default.
+/// Stored setting: "auto" (default) or a country code.
 fn chart_region(core: &Core) -> String {
-    core.db.get_setting("chart_region").unwrap_or_else(|| "US".into())
+    core.db.get_setting("chart_region").unwrap_or_else(|| "auto".into())
+}
+
+/// Where the user is, from OS settings, US if unknown.
+/// Windows: the "Country or region" home location (independent of UI language, so an
+/// English Windows in Ukraine still gives "UA"). Elsewhere: the locale's region ("uk-UA").
+fn detected_region() -> String {
+    #[cfg(windows)]
+    if let Some(c) = windows_home_location() {
+        return c;
+    }
+    sys_locale::get_locale()
+        .and_then(|l| l.replace('_', "-").split('-').nth(1).map(str::to_uppercase))
+        .filter(|c| c.len() == 2 && c.chars().all(|ch| ch.is_ascii_alphabetic()))
+        .unwrap_or_else(|| "US".into())
+}
+
+#[cfg(windows)]
+fn windows_home_location() -> Option<String> {
+    use windows_sys::Win32::Globalization::GetUserDefaultGeoName;
+    let mut buf = [0u16; 16];
+    // SAFETY: buffer pointer and length are valid; returns chars written incl. NUL (0 on error).
+    let n = unsafe { GetUserDefaultGeoName(buf.as_mut_ptr(), buf.len() as i32) };
+    if n <= 1 {
+        return None;
+    }
+    let s = String::from_utf16_lossy(&buf[..(n as usize - 1)]);
+    // Two-letter ISO codes only (numeric UN M.49 codes are returned for regions like "World").
+    (s.len() == 2 && s.chars().all(|c| c.is_ascii_alphabetic())).then(|| s.to_uppercase())
+}
+
+fn effective_region(core: &Core) -> String {
+    match chart_region(core).as_str() {
+        "auto" => detected_region(),
+        r => r.to_string(),
+    }
 }
 
 #[tauri::command]
 pub fn set_chart_region(core: St, region: String) -> Res<()> {
-    const ALLOWED: [&str; 6] = ["US", "GB", "DE", "FR", "PL", "UA"];
+    const ALLOWED: [&str; 7] = ["auto", "US", "GB", "DE", "FR", "PL", "UA"];
     if !ALLOWED.contains(&region.as_str()) {
         return Err("unsupported region".into());
     }
@@ -280,6 +324,7 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
         },
         google_login_supported: cfg!(desktop),
         chart_region: chart_region(&core),
+        detected_region: detected_region(),
     })
 }
 

@@ -25,6 +25,7 @@ const subsLabel = (n) => (n == null ? '' : t('subscribers', { n: compact(n) }));
 const regionName = (code) => {
   try { return new Intl.DisplayNames([locale()], { type: 'region' }).of(code) || code; } catch { return code; }
 };
+const COVER_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-12 -12 48 48' fill='none' stroke='%236f6f7c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='-12' y='-12' width='48' height='48' fill='%231c1c22' stroke='none'/%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E";
 const qualityLabel = (codec, kbps) => [codec, kbps ? `${kbps} kbps` : ''].filter(Boolean).join(' · ');
 const GOOGLE_G = '<svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.2C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.4-4.6 7l7.1 5.5c4.2-3.9 7.2-9.6 7.2-17z"/><path fill="#FBBC05" d="M10.5 28.6A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.6l-7.9-6.2A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.1-5.5c-2 1.4-4.6 2.2-8.8 2.2-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 const artistLinks = (artists = []) => artists.map((a) =>
@@ -264,7 +265,7 @@ const views = {
         <span>${esc(q.title)}</span></div>`).join('')}</div>`;
     if (recent.length) html += `<section class="shelf"><h2>${esc(t('home.recent'))}</h2>${trackRows(recent, { header: false, album: false })}</section>`;
     for (const s of home.sections || []) {
-      const title = t(`sec.${s.title}`);
+      const title = t(`sec.${s.title}`, { name: s.param || '' });
       if (s.tracks?.length) html += `<section class="shelf"><h2>${esc(title)}</h2>${trackRows(s.tracks.slice(0, 10), { header: false })}</section>`;
       html += shelf(title, s.albums, 'album');
       html += shelf(title, s.playlists, 'playlist');
@@ -425,7 +426,7 @@ const views = {
         <h2 class="sub-h">${esc(t('set.region'))}</h2>
         <p class="muted small">${esc(t('set.regionHint'))}</p>
         <div class="row"><select id="region-select" class="text-in select">
-          ${['US', 'GB', 'DE', 'FR', 'PL', 'UA'].map((c) => `<option value="${c}" ${c === s.chart_region ? 'selected' : ''}>${esc(regionName(c))}</option>`).join('')}
+          ${['auto', 'US', 'GB', 'DE', 'FR', 'PL', 'UA'].map((c) => `<option value="${c}" ${c === s.chart_region ? 'selected' : ''}>${esc(c === 'auto' ? t('set.regionAuto', { name: regionName(s.detected_region) }) : regionName(c))}</option>`).join('')}
         </select></div>
       </section>
       <section class="set-block">
@@ -885,8 +886,15 @@ sInput.addEventListener('focus', () => { if (sInput.value.trim()) loadSuggest(sI
 const audio = player.audio;
 function updateNowPlaying() {
   const cur = player.current;
-  $('#player').classList.toggle('empty', !cur);
-  if (!cur) return;
+  $('#player').classList.toggle('idle', !cur);
+  if (!cur) {
+    // Idle player stays visible (like Spotify) with a placeholder.
+    $('#np-cover').src = COVER_PLACEHOLDER;
+    $('#np-title').textContent = t('pl.idle');
+    $('#np-artist').textContent = t('pl.idleSub');
+    $('#np-quality').textContent = '';
+    return;
+  }
   $('#np-cover').src = cur.cover || '';
   $('#np-title').innerHTML = cur.album?.id ? `<a class="link" data-go="album" data-id="${esc(cur.album.id)}">${esc(cur.title)}</a>` : esc(cur.title);
   $('#np-artist').innerHTML = artistLinks(cur.artists);

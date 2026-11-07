@@ -113,7 +113,10 @@ jobs:
           export NDK_HOME="$NDK"
           export LIBCLANG_PATH=/usr/lib/llvm-18/lib
           TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--target=aarch64-linux-android24 --sysroot=$TC/sysroot -I$(ls -d "$TC"/lib/clang/*/include | head -1)"
+          # bindgen detects include paths by asking a clang binary; point it at the
+          # NDK's clang, otherwise the host's glibc headers leak into the Android build.
+          export CLANG_PATH="$TC/bin/clang"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--target=aarch64-linux-android24 --sysroot=$TC/sysroot"
           cd src-tauri
           npx --yes @tauri-apps/cli@2 android build --apk --target aarch64 --ci
 

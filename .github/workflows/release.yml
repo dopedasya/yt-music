@@ -62,35 +62,47 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
+      # Without signing secrets (e.g. in a fork) skip the Android build instead of failing the release.
+      - name: Signing key
+        id: sign
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::notice::ANDROID_KEYSTORE_BASE64 is not set, skipping the Android build"
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.sign.outputs.ok == 'true'
 
       - uses: actions/setup-java@v4
+        if: steps.sign.outputs.ok == 'true'
         with:
           distribution: temurin
           java-version: 17
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.sign.outputs.ok == 'true'
         with:
           targets: aarch64-linux-android
 
       - uses: swatinem/rust-cache@v2
+        if: steps.sign.outputs.ok == 'true'
         with:
           workspaces: src-tauri -> target
           key: android
 
       - uses: actions/setup-node@v4
+        if: steps.sign.outputs.ok == 'true'
         with:
           node-version: 22
 
-      - name: Signing key
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ]; then echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"; exit 1; fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-
       - name: Build APK
+        if: steps.sign.outputs.ok == 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -105,6 +117,7 @@ jobs:
           npx --yes @tauri-apps/cli@2 android build --apk --target aarch64 --ci
 
       - name: Upload to release
+        if: steps.sign.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

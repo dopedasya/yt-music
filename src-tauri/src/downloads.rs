@@ -1,13 +1,15 @@
-//! Offline downloads: fetch the audio stream in chunks, tag it, register it in the library.
+//! Offline downloads: fetch the audio stream in bounded chunks and store it encrypted in
+//! our `.ytmc` container (see `vault`). Track metadata lives in the library DB, files are
+//! named by a hash of the video id, so the download folder reveals nothing.
 use crate::models::{DownloadProgress, Track};
 use crate::state::Core;
-use crate::ytdlp;
+use crate::vault;
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
 
 const CHUNK: u64 = 4 * 1024 * 1024;
 
@@ -31,7 +33,8 @@ pub fn enqueue(app: AppHandle, core: Arc<Core>, tracks: Vec<Track>) {
         tauri::async_runtime::spawn(async move {
             let _permit = core.download_slots.acquire().await;
             emit(&app, &t.id, "downloading", 0.0, None);
-            let res = download_one(&app, &core, &t).await;
+            let progress = |p: f32| emit(&app, &t.id, "downloading", p, None);
+            let res = download_one(&core, &t, progress).await;
             core.downloading.lock().unwrap().remove(&t.id);
             match res {
                 Ok(()) => emit(&app, &t.id, "done", 1.0, None),
@@ -44,75 +47,51 @@ pub fn enqueue(app: AppHandle, core: Arc<Core>, tracks: Vec<Track>) {
     }
 }
 
-fn sanitize(s: &str) -> String {
-    let cleaned: String = s
-        .chars()
-        .map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { '_' } else { c })
-        .collect();
-    let trimmed = cleaned.trim().trim_end_matches(['.', ' ']);
-    trimmed.chars().take(120).collect()
+/// `<dir>/<first 16 bytes of sha256(id) as hex>.ytmc`
+pub fn file_for(dir: &Path, id: &str) -> PathBuf {
+    let h = Sha256::digest(id.as_bytes());
+    let name: String = h[..16].iter().map(|b| format!("{b:02x}")).collect();
+    dir.join(name).with_extension(vault::EXT)
 }
 
-fn target_stem(dir: &Path, t: &Track) -> PathBuf {
-    let artist = t.artist_line();
-    let base = if artist.is_empty() {
-        sanitize(&t.title)
-    } else {
-        sanitize(&format!("{artist} - {}", t.title))
-    };
-    let base = if base.is_empty() { t.id.clone() } else { base };
-    let stem = dir.join(&base);
-    // Same name for a different track (remixes, re-uploads) gets the id appended.
-    let taken = ["m4a", "webm", "opus"].iter().any(|e| stem.with_extension(e).exists());
-    if taken { dir.join(format!("{base} [{}]", t.id)) } else { stem }
-}
-
-async fn download_one(app: &AppHandle, core: &Core, t: &Track) -> Result<()> {
+async fn download_one(core: &Core, t: &Track, progress: impl Fn(f32) + Sync) -> Result<()> {
     let dir = core.download_dir();
     tokio::fs::create_dir_all(&dir).await.context("couldn't create the download folder")?;
-    let stem = target_stem(&dir, t);
-
-    let path = match core.yt.stream(&t.id).await {
-        Ok(info) => {
-            let ext = if info.mime.contains("webm") { "webm" } else { "m4a" };
-            let dest = stem.with_extension(ext);
-            let progress = |p: f32| emit(app, &t.id, "downloading", p, None);
-            match fetch(core, &info.url, info.size, &dest, progress).await {
-                Ok(()) => dest,
-                Err(e) => {
-                    eprintln!("direct download failed ({e:#}), using yt-dlp");
-                    via_ytdlp(core, t, &stem).await?
-                }
+    let dest = file_for(&dir, &t.id);
+    let key = core.vault_key()?;
+    // googlevideo occasionally refuses a freshly issued URL (403); like the playback
+    // proxy, drop the cached URL and try once more with a new one.
+    let mut attempt = 0;
+    let info = loop {
+        let info = core.yt.stream(&t.id, core.download_codec()).await?;
+        match fetch_encrypted(core, &info.url, info.size, &info.mime, &key, &dest, &progress).await {
+            Ok(()) => break info,
+            Err(e) if attempt == 0 => {
+                eprintln!("download {} attempt 1 failed ({e:#}); retrying with a fresh URL", t.id);
+                core.yt.invalidate(&t.id);
+                attempt += 1;
             }
-        }
-        Err(e) => {
-            eprintln!("stream lookup failed ({e:#}), using yt-dlp");
-            via_ytdlp(core, t, &stem).await?
+            Err(e) => return Err(e),
         }
     };
-
-    if path.extension().is_some_and(|e| e == "m4a")
-        && let Err(e) = tag(core, t, &path).await
-    {
-        eprintln!("tagging {} failed: {e:#}", path.display());
-    }
-    let size = tokio::fs::metadata(&path).await?.len();
-    core.db.add_download(t, &path.to_string_lossy(), size)?;
+    let size = tokio::fs::metadata(&dest).await?.len();
+    core.db.add_download(t, &dest.to_string_lossy(), size, info.codec.label(), info.kbps)?;
     Ok(())
 }
 
-async fn via_ytdlp(core: &Core, t: &Track, stem: &Path) -> Result<PathBuf> {
-    let dest = stem.with_extension("m4a");
-    ytdlp::download(&core.ytdlp_dir(), &t.id, &dest).await?;
-    if !dest.is_file() {
-        bail!("yt-dlp didn't produce a file");
-    }
-    Ok(dest)
-}
-
-async fn fetch(core: &Core, url: &str, size: Option<u64>, dest: &Path, progress: impl Fn(f32)) -> Result<()> {
+/// Download in bounded Range chunks (googlevideo rejects open-ended/huge ranges),
+/// encrypting on the fly. Writes to `.part` and renames on success.
+async fn fetch_encrypted(
+    core: &Core,
+    url: &str,
+    size: Option<u64>,
+    mime: &str,
+    key: &vault::Key,
+    dest: &Path,
+    progress: impl Fn(f32),
+) -> Result<()> {
     let part = dest.with_extension("part");
-    let mut file = tokio::fs::File::create(&part).await?;
+    let mut w = vault::Writer::create(&part, key, mime).await?;
     let mut total = size;
     let mut done: u64 = 0;
     let mut last_emit = Instant::now();
@@ -140,20 +119,18 @@ async fn fetch(core: &Core, url: &str, size: Option<u64>, dest: &Path, progress:
             let mut resp = resp;
             let mut got = 0u64;
             while let Some(chunk) = resp.chunk().await? {
-                file.write_all(&chunk).await?;
+                w.write(&chunk).await?;
                 got += chunk.len() as u64;
                 done += chunk.len() as u64;
                 if last_emit.elapsed().as_millis() > 300 {
                     last_emit = Instant::now();
-                    let p = total.map_or(0.0, |t| done as f32 / t as f32);
-                    progress(p.min(0.99));
+                    progress(total.map_or(0.0, |t| done as f32 / t as f32).min(0.99));
                 }
             }
             if got == 0 || full_body || total.is_some_and(|t| done >= t) {
                 break;
             }
         }
-        file.flush().await?;
         if done == 0 {
             bail!("empty response");
         }
@@ -161,78 +138,51 @@ async fn fetch(core: &Core, url: &str, size: Option<u64>, dest: &Path, progress:
     }
     .await;
 
-    drop(file);
-    if let Err(e) = result {
-        let _ = tokio::fs::remove_file(&part).await;
-        return Err(e);
+    match result {
+        Ok(()) => {
+            w.finish().await?;
+            tokio::fs::rename(&part, dest).await?;
+            Ok(())
+        }
+        Err(e) => {
+            drop(w);
+            let _ = tokio::fs::remove_file(&part).await;
+            Err(e)
+        }
     }
-    tokio::fs::rename(&part, dest).await?;
-    Ok(())
-}
-
-async fn tag(core: &Core, t: &Track, path: &Path) -> Result<()> {
-    let cover = match &t.cover {
-        Some(u) => match core.http.get(u).send().await {
-            Ok(r) if r.status().is_success() => r.bytes().await.ok().map(|b| b.to_vec()),
-            _ => None,
-        },
-        None => None,
-    };
-    let (t, path) = (t.clone(), path.to_path_buf());
-    tokio::task::spawn_blocking(move || write_tags(&t, &path, cover)).await?
-}
-
-fn write_tags(t: &Track, path: &Path, cover: Option<Vec<u8>>) -> Result<()> {
-    use lofty::config::WriteOptions;
-    use lofty::picture::{MimeType, Picture, PictureType};
-    use lofty::prelude::*;
-    use lofty::tag::{Tag, TagType};
-
-    let mut tagged = lofty::read_from_path(path)?;
-    if tagged.primary_tag().is_none() {
-        tagged.insert_tag(Tag::new(TagType::Mp4Ilst));
-    }
-    let tag = tagged.primary_tag_mut().context("no tag")?;
-    tag.set_title(t.title.clone());
-    let artist = t.artist_line();
-    if !artist.is_empty() {
-        tag.set_artist(artist);
-    }
-    if let Some(a) = &t.album {
-        tag.set_album(a.name.clone());
-    }
-    tag.insert_text(ItemKey::Comment, format!("https://music.youtube.com/watch?v={}", t.id));
-    if let Some(bytes) = cover {
-        let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) { MimeType::Png } else { MimeType::Jpeg };
-        tag.push_picture(Picture::unchecked(bytes).pic_type(PictureType::CoverFront).mime_type(mime).build());
-    }
-    tag.save_to_path(path, WriteOptions::default())?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod live_tests {
     use super::*;
+    use crate::yt::Codec;
 
     #[tokio::test]
     #[ignore]
-    async fn live_download_and_tag() {
-        use lofty::prelude::*;
+    async fn live_download_encrypted() {
         let core = crate::state::test_core();
         let t = core.yt.search("Okean Elzy Obiymy").await.unwrap().tracks.remove(0);
         let dir = core.download_dir();
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        let info = core.yt.stream(&t.id).await.unwrap();
-        let dest = target_stem(&dir, &t).with_extension("m4a");
-        let start = Instant::now();
-        fetch(&core, &info.url, info.size, &dest, |_| {}).await.unwrap();
-        println!("downloaded {} in {:?}", dest.display(), start.elapsed());
-        tag(&core, &t, &dest).await.unwrap();
-        let f = lofty::read_from_path(&dest).unwrap();
-        let tg = f.primary_tag().unwrap();
-        println!("title={:?} artist={:?} album={:?} pictures={} duration={:?}",
-            tg.title(), tg.artist(), tg.album(), tg.pictures().len(), f.properties().duration());
-        assert_eq!(tg.title().as_deref(), Some(t.title.as_str()));
-        std::fs::remove_file(&dest).ok();
+        for codec in [Codec::Aac, Codec::Opus] {
+            let info = core.yt.stream(&t.id, codec).await.unwrap();
+            let dest = dir.join(format!("test-{codec:?}.ytmc"));
+            let key = core.vault_key().unwrap();
+            let start = Instant::now();
+            fetch_encrypted(&core, &info.url, info.size, &info.mime, &key, &dest, |_| {}).await.unwrap();
+            let len = std::fs::metadata(&dest).unwrap().len();
+            println!("{codec:?}: {} {:?} kbps, {} bytes in {:?}", info.mime, info.kbps, len, start.elapsed());
+            // decrypting the first bytes must give the container signature back
+            let mut f = tokio::fs::File::open(&dest).await.unwrap();
+            let h = vault::read_header(&mut f).await.unwrap();
+            let mut r = vault::RangeReader::open(f, &h, &key, 0, 16).await.unwrap();
+            let head = r.next_chunk().await.unwrap().unwrap();
+            match codec {
+                Codec::Aac => assert_eq!(&head[4..8], b"ftyp", "MP4 signature"),
+                Codec::Opus => assert_eq!(&head[..4], [0x1A, 0x45, 0xDF, 0xA3], "WebM/EBML signature"),
+            }
+            assert!(info.size.is_none_or(|s| len >= s), "complete file");
+            std::fs::remove_file(&dest).ok();
+        }
     }
 }

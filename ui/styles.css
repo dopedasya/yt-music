@@ -29,6 +29,10 @@
   --line: var(--stroke);
 
   --radius: 24px;
+  --r-xs: 8px;   /* 40-44px track thumbs */
+  --r-sm: 10px;  /* 44-56px covers, rows */
+  --r-md: 14px;  /* tiles, inputs */
+  --r-lg: 20px;  /* big hero art */
   --gap: 16px;
   --player-h: 88px;
   --blur: blur(32px) saturate(140%);
@@ -318,8 +322,9 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 6px; font: 12px
 /* ------------------------------------------------------------ player bar */
 #player { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(320px, 2fr) minmax(180px, 1fr); align-items: center; gap: 24px; padding: 0 24px 0 14px;
   background: rgba(14, 14, 18, .72); border: 1px solid var(--stroke); border-radius: var(--radius); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
-#player.empty .now, #player.empty .controls { opacity: .4; pointer-events: none; }
-#player.empty .np-cover { visibility: hidden; }
+#player.idle .controls, #player.idle #np-like, #player.idle .extra .icon-btn { opacity: .45; pointer-events: none; }
+#player.idle .np-title { color: var(--muted); font-weight: 500; }
+#player.idle .np-cover { cursor: default; }
 .now { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .np-cover { width: 60px; height: 60px; border-radius: 14px; object-fit: cover; background: var(--elev); cursor: pointer; flex: none; }
 .np-text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -439,7 +444,7 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 6px; font: 12px
   /* mini player */
   #player { grid-column: 1; grid-row: 2; position: relative; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; height: var(--player-h);
     margin: 0 8px; padding: 0 6px; border-radius: 16px; }
-  #player.empty { display: none; }
+  #player.idle { display: none; }
   .np-cover { width: 44px; height: 44px; border-radius: 10px; }
   .controls { flex-direction: row; }
   .ctrl-btns { gap: 4px; }
@@ -500,3 +505,72 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 6px; font: 12px
 @media (prefers-reduced-transparency: reduce) {
   #sidebar, #rightpanel, #player, .tracklist, .ctxmenu, .modal { background: #111116; }
 }
+
+/* ------------------------------------------------------------ cover-tinted pages (colour from Rust) */
+#main { --page-color: #2a2a35; transition: background-color .4s; }
+#main.tinted { background: linear-gradient(180deg, color-mix(in srgb, var(--page-color) 60%, transparent) 0, color-mix(in srgb, var(--page-color) 18%, transparent) 260px, transparent 560px) no-repeat; }
+#main.tinted #topbar.scrolled { background: color-mix(in srgb, var(--page-color) 45%, rgba(11, 11, 15, .9)); }
+#main.tinted .hero-art { box-shadow: 0 24px 60px #000a; }
+#main.tinted .artist-hero { background: linear-gradient(transparent 20%, var(--bg)), var(--bg-img, var(--page-color)) center 25% / cover; }
+
+/* ------------------------------------------------------------ lyrics (Spotify-style) */
+#main.lyrics-mode, #main.lyrics-mode.tinted { background: var(--page-color); transition: background-color .6s; }
+#main.lyrics-mode #topbar.scrolled { background: color-mix(in srgb, var(--page-color) 80%, #000); box-shadow: none; }
+.lyrics-page { max-width: 900px; padding: 8px 8px 30vh; }
+.ly-head { display: flex; align-items: center; gap: 14px; margin: 4px 0 28px; }
+.ly-head img { width: 56px; height: 56px; border-radius: var(--r-sm); object-fit: cover; box-shadow: 0 6px 20px #0006; }
+.ly-head div { display: flex; flex-direction: column; gap: 2px; }
+.ly-head b { font-size: 16px; font-weight: 600; }
+.ly-head span { color: #ffffffb0; font-size: 13px; }
+.ly-lines { display: flex; flex-direction: column; gap: 6px; }
+.ly-line { margin: 0; font-size: clamp(22px, 3vw, 32px); font-weight: 800; line-height: 1.3; letter-spacing: -0.025em;
+  color: #00000080; cursor: pointer; transition: color .25s, transform .25s; transform-origin: left center; user-select: text; }
+.ly-line:hover { color: #ffffffd0; }
+.ly-line.past { color: #ffffffa8; }
+.ly-line.active { color: #fff; text-shadow: 0 0 24px rgba(255, 255, 255, .35); }
+.ly-line.gap { font-size: 22px; }
+.ly-plain { font-size: clamp(20px, 2.6vw, 28px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.5; color: #fff; user-select: text; }
+.ly-empty { font-size: 24px; font-weight: 700; margin-top: 18vh; text-align: center; }
+.ly-source { color: #ffffff99; font: 500 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; margin-top: 40px; }
+@media (prefers-reduced-motion: reduce) { .ly-line { transition: none; } }
+
+/* ------------------------------------------------------------ quality badges */
+.qpill { display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--stroke-strong); border-radius: 999px; padding: 3px 8px; margin-right: 6px; white-space: nowrap; }
+.qpill:empty { display: none; }
+.qpill.offline { color: var(--accent); border-color: rgba(61, 220, 132, .4); }
+.qpill .ic, .hero-meta .ic { width: 12px; height: 12px; vertical-align: -1px; }
+.qbadge { font: 600 10px/1.4 var(--mono); color: var(--muted); border: 1px solid var(--stroke-strong); border-radius: 4px; padding: 0 4px; margin-right: 4px; flex: none; }
+
+/* ------------------------------------------------------------ settings: google + quality */
+.google-btn { display: inline-flex; align-items: center; gap: 12px; background: #fff; color: #1f1f1f; border: 0; border-radius: 999px;
+  padding: 10px 22px 10px 14px; font-weight: 600; font-size: 15px; box-shadow: 0 0 24px rgba(255, 255, 255, .2); transition: transform .1s, box-shadow .1s; }
+.google-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 0 32px rgba(255, 255, 255, .35); }
+.google-btn .g-logo { width: 20px; height: 20px; }
+.advanced { margin-top: 18px; }
+.advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.advanced[open] summary { margin-bottom: 8px; }
+.seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0 16px; }
+.seg-opt { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 12px 40px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--stroke); cursor: pointer; transition: border-color .12s, background .12s; }
+.seg-opt:hover { background: var(--surface-hover); }
+.seg-opt input { position: absolute; left: 14px; top: 15px; accent-color: var(--accent); width: 16px; height: 16px; }
+.seg-opt small { color: var(--muted); }
+.seg-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+/* ------------------------------------------------------------ update button */
+.update-btn { background: var(--accent); border-color: var(--accent); color: var(--on-light); margin-right: 8px; box-shadow: 0 0 20px rgba(61, 220, 132, .35); animation: tin .3s ease-out; }
+.update-btn:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+
+.settings .sub-h { font-size: 16px; margin-top: 20px; }
+
+/* ------------------------------------------------------------ sleep timer, hotkeys */
+.sleep-btn { position: relative; gap: 2px; grid-auto-flow: column; border-radius: 999px; padding: 6px 8px; }
+.sleep-btn #sleep-left { font: 600 11px var(--mono); font-variant-numeric: tabular-nums; }
+.sleep-btn #sleep-left:empty { display: none; }
+.sleep-btn.on::after { display: none; }
+#np-add .ic { width: 18px; height: 18px; }
+#player.idle #np-add { opacity: .45; pointer-events: none; }
+kbd { font: 600 11px/1 var(--mono); background: var(--surface); border: 1px solid var(--stroke-strong); border-bottom-width: 2px; border-radius: 6px; padding: 2px 6px; color: var(--text); }
+.hotkey-list { line-height: 2.2; margin-top: 4px; }
+.settings .check { margin: 8px 0; }

@@ -8,8 +8,23 @@ on:
 permissions:
   contents: write
 
+# Third-party actions are pinned to full commit SHAs (supply-chain safety:
+# the android job handles the release signing key). Comments show the version.
 jobs:
+  # Fail fast if any frontend module doesn't even parse (it would ship a blank UI).
+  check-ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Syntax-check ui/*.js as ES modules
+        run: |
+          t="$(mktemp -d)"
+          for f in ui/*.js; do cp "$f" "$t/$(basename "${f%.js}").mjs"; node --check "$t/$(basename "${f%.js}").mjs"; done
+
   build:
+    needs: check-ui
+    # Manual runs (workflow_dispatch) only check the Android build.
+    if: startsWith(github.ref, 'refs/tags/')
     strategy:
       fail-fast: false
       matrix:
@@ -24,7 +39,7 @@ jobs:
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -32,35 +47,40 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri -> target
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs update bundles; tauri-action then uploads *.sig + latest.json for the in-app updater.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'YT Music ${{ github.ref_name }}'
           releaseBody: |
             Unofficial YouTube Music client. Not affiliated with Google LLC.
 
-            **Windows:** `*_x64-setup.exe` · **macOS:** `*_aarch64.dmg` (Apple Silicon) / `*_x64.dmg` (Intel). The app isn't notarized, so right-click → Open on first launch · **Linux:** `.AppImage` / `.deb`
+            **Windows:** `*_x64-setup.exe` · **macOS:** `*_aarch64.dmg` (Apple Silicon) / `*_x64.dmg` (Intel). The app isn't notarized, so right-click → Open on first launch · **Linux:** `.AppImage` / `.deb` · **Android:** `*_android-arm64.apk`
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
 
   android:
     needs: build
-    runs-on: ubuntu-22.04
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-24.04
     steps:
       # Without signing secrets (e.g. in a fork) skip the Android build instead of failing the release.
       - name: Signing key
@@ -76,30 +96,47 @@ jobs:
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.sign.outputs.ok == 'true'
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         if: steps.sign.outputs.ok == 'true'
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         if: steps.sign.outputs.ok == 'true'
         with:
+          toolchain: stable
           targets: aarch64-linux-android
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.sign.outputs.ok == 'true'
         with:
           workspaces: src-tauri -> target
           key: android
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.sign.outputs.ok == 'true'
         with:
           node-version: 22
+
+      # rquickjs-sys (via rustypipe) generates its Android bindings with bindgen.
+      # libclang must match the NDK's clang (NDK 27 ships clang 18).
+      - name: libclang 18
+        if: steps.sign.outputs.ok == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libclang-18-dev
+
+      # The Gradle project calls `cargo tauri ...`; route that to the npm CLI instead of
+      # compiling tauri-cli (cargo passes the subcommand name "tauri" as $1).
+      - name: cargo-tauri shim
+        if: steps.sign.outputs.ok == 'true'
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/bin/sh\nshift\nexec npx --yes @tauri-apps/cli@2 "$@"\n' > "$HOME/.local/bin/cargo-tauri"
+          chmod +x "$HOME/.local/bin/cargo-tauri"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build APK
         if: steps.sign.outputs.ok == 'true'
@@ -108,16 +145,20 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          TC="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-          CLANG_INC="$(ls -d "$TC"/lib/clang/*/include | head -1)"
-          # rquickjs-sys generates its bindings with bindgen on Android
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--target=aarch64-linux-android24 --sysroot=$TC/sysroot -I$CLANG_INC"
+          NDK="$(ls -d "$ANDROID_HOME"/ndk/27.* | sort -V | tail -1)"
+          echo "Using NDK $NDK"
+          export NDK_HOME="$NDK"
+          export LIBCLANG_PATH=/usr/lib/llvm-18/lib
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          # bindgen detects include paths by asking a clang binary; point it at the
+          # NDK's clang, otherwise the host's glibc headers leak into the Android build.
+          export CLANG_PATH="$TC/bin/clang"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--target=aarch64-linux-android24 --sysroot=$TC/sysroot"
           cd src-tauri
           npx --yes @tauri-apps/cli@2 android build --apk --target aarch64 --ci
 
       - name: Upload to release
-        if: steps.sign.outputs.ok == 'true'
+        if: steps.sign.outputs.ok == 'true' && startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

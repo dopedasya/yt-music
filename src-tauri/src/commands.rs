@@ -1,7 +1,8 @@
 //! Tauri commands invoked from the frontend.
 use crate::models::*;
 use crate::state::Core;
-use crate::{downloads, ytdlp};
+use crate::yt::Codec;
+use crate::{color, downloads, lyrics, ytdlp};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, State};
@@ -15,7 +16,7 @@ fn e<E: std::fmt::Display>(err: E) -> String {
 
 #[tauri::command]
 pub fn stream_base(core: St) -> String {
-    format!("http://127.0.0.1:{}", core.port.load(Ordering::Relaxed))
+    format!("http://127.0.0.1:{}/{}", core.port.load(Ordering::Relaxed), core.stream_token)
 }
 
 // ------------------------------------------------------------- YouTube Music
@@ -31,7 +32,65 @@ pub async fn search_suggestions(core: St<'_>, query: String) -> Res<Vec<String>>
 
 #[tauri::command]
 pub async fn home(core: St<'_>) -> Res<Home> {
-    core.yt.home().await.map_err(e)
+    // "Made for you" first (from your history/likes), then charts for your region.
+    let region = effective_region(&core);
+    let (personal, general) = tokio::join!(crate::recommend::personal(&core), core.yt.home(&region));
+    let mut sections = personal;
+    match general {
+        Ok(h) => sections.extend(h.sections),
+        Err(err) if sections.is_empty() => return Err(e(err)),
+        Err(_) => {}
+    }
+    Ok(Home { sections })
+}
+
+/// Stored setting: "auto" (default) or a country code.
+fn chart_region(core: &Core) -> String {
+    core.db.get_setting("chart_region").unwrap_or_else(|| "auto".into())
+}
+
+/// Where the user is, from OS settings, US if unknown.
+/// Windows: the "Country or region" home location (independent of UI language, so an
+/// English Windows in Ukraine still gives "UA"). Elsewhere: the locale's region ("uk-UA").
+fn detected_region() -> String {
+    #[cfg(windows)]
+    if let Some(c) = windows_home_location() {
+        return c;
+    }
+    sys_locale::get_locale()
+        .and_then(|l| l.replace('_', "-").split('-').nth(1).map(str::to_uppercase))
+        .filter(|c| c.len() == 2 && c.chars().all(|ch| ch.is_ascii_alphabetic()))
+        .unwrap_or_else(|| "US".into())
+}
+
+#[cfg(windows)]
+fn windows_home_location() -> Option<String> {
+    use windows_sys::Win32::Globalization::GetUserDefaultGeoName;
+    let mut buf = [0u16; 16];
+    // SAFETY: buffer pointer and length are valid; returns chars written incl. NUL (0 on error).
+    let n = unsafe { GetUserDefaultGeoName(buf.as_mut_ptr(), buf.len() as i32) };
+    if n <= 1 {
+        return None;
+    }
+    let s = String::from_utf16_lossy(&buf[..(n as usize - 1)]);
+    // Two-letter ISO codes only (numeric UN M.49 codes are returned for regions like "World").
+    (s.len() == 2 && s.chars().all(|c| c.is_ascii_alphabetic())).then(|| s.to_uppercase())
+}
+
+fn effective_region(core: &Core) -> String {
+    match chart_region(core).as_str() {
+        "auto" => detected_region(),
+        r => r.to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn set_chart_region(core: St, region: String) -> Res<()> {
+    const ALLOWED: [&str; 7] = ["auto", "US", "GB", "DE", "FR", "PL", "UA"];
+    if !ALLOWED.contains(&region.as_str()) {
+        return Err("unsupported region".into());
+    }
+    core.db.set_setting("chart_region", &region).map_err(e)
 }
 
 #[tauri::command]
@@ -59,17 +118,98 @@ pub async fn get_radio(core: St<'_>, id: String) -> Res<Vec<Track>> {
     core.yt.radio(&id).await.map_err(e)
 }
 
+/// Synced lyrics (LRCLIB) with YouTube Music's plain lyrics as fallback.
+/// Results are cached in the DB, so lyrics of offline tracks work without internet.
 #[tauri::command]
-pub async fn get_lyrics(core: St<'_>, id: String) -> Res<Option<LyricsOut>> {
-    core.yt.lyrics(&id).await.map_err(e)
+pub async fn get_lyrics(core: St<'_>, track: Track) -> Res<Option<lyrics::Lyrics>> {
+    let key = format!("lyrics:{}", track.id);
+    if let Some(cached) = core.db.cache_get(&key) {
+        return Ok(serde_json::from_str(&cached).ok().flatten());
+    }
+    let (lrc, yt) = tokio::join!(lyrics::lrclib(&core.http, &track), core.yt.lyrics(&track.id));
+    // Both sources answered (even "nothing found") → the result is worth caching.
+    let definite = lrc.is_ok() && yt.is_ok();
+    let found = match lrc {
+        Ok(Some(l)) if !l.synced.is_empty() || l.instrumental => Some(l),
+        other => {
+            let plain_lrc = other.ok().flatten();
+            match yt {
+                Ok(Some(y)) => Some(lyrics::Lyrics {
+                    synced: vec![],
+                    plain: Some(y.body),
+                    source: "YouTube Music".into(),
+                    instrumental: false,
+                }),
+                _ => plain_lrc,
+            }
+        }
+    };
+    // Don't cache after a network error, so it's retried next time.
+    if found.is_some() || definite {
+        let _ = core.db.cache_put(&key, &serde_json::to_string(&found).unwrap_or_default());
+    }
+    Ok(found)
+}
+
+/// Accent colour of a cover image (`#rrggbb`), computed in Rust and cached.
+#[tauri::command]
+pub async fn cover_color(core: St<'_>, url: String) -> Res<String> {
+    // Only fetch cover art from Google's image hosts; never arbitrary URLs (no SSRF
+    // into the local network through this command).
+    if !is_cover_url(&url) {
+        return Err("not a cover image URL".into());
+    }
+    let key = format!("color:{url}");
+    if let Some(c) = core.db.cache_get(&key) {
+        return Ok(c);
+    }
+    let bytes = core.http.get(&url).send().await.map_err(e)?.error_for_status().map_err(e)?.bytes().await.map_err(e)?;
+    let c = tokio::task::spawn_blocking(move || color::dominant(&bytes)).await.map_err(e)?.map_err(e)?;
+    let _ = core.db.cache_put(&key, &c);
+    Ok(c)
+}
+
+fn is_cover_url(u: &str) -> bool {
+    const HOSTS: [&str; 3] = ["googleusercontent.com", "ggpht.com", "ytimg.com"];
+    let Ok(url) = url::Url::parse(u) else { return false };
+    let host = url.host_str().unwrap_or("");
+    url.scheme() == "https"
+        && url.port().is_none()
+        && HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cover_url;
+
+    #[test]
+    fn cover_url_allowlist() {
+        assert!(is_cover_url("https://lh3.googleusercontent.com/abc=w544-h544"));
+        assert!(is_cover_url("https://i.ytimg.com/vi/x/hqdefault.jpg"));
+        assert!(!is_cover_url("http://lh3.googleusercontent.com/abc"), "https only");
+        assert!(!is_cover_url("https://192.168.1.1/admin"));
+        assert!(!is_cover_url("https://evilgoogleusercontent.com/x"));
+        assert!(!is_cover_url("https://googleusercontent.com.evil.io/x"));
+        assert!(!is_cover_url("https://lh3.googleusercontent.com:8443/x"));
+    }
+}
+
+/// Quality of what is (about to be) played: the offline file, or the AAC stream.
+#[tauri::command]
+pub async fn stream_quality(core: St<'_>, id: String) -> Res<StreamQuality> {
+    if let Some((codec, kbps)) = core.db.download_quality(&id) {
+        return Ok(StreamQuality { codec, kbps, offline: true });
+    }
+    let s = core.yt.stream(&id, Codec::Aac).await.map_err(e)?;
+    Ok(StreamQuality { codec: Some(s.codec.label().into()), kbps: s.kbps, offline: false })
 }
 
 #[tauri::command]
-pub async fn prefetch_stream(core: St<'_>, id: String) -> Res<()> {
-    if core.db.download_path(&id).is_none() {
-        core.yt.stream(&id).await.map_err(e)?;
+pub fn set_download_quality(core: St, quality: String) -> Res<()> {
+    if quality != "opus" && quality != "aac" {
+        return Err("quality must be opus or aac".into());
     }
-    Ok(())
+    core.db.set_setting("download_quality", &quality).map_err(e)
 }
 
 // ------------------------------------------------------------- library
@@ -124,11 +264,6 @@ pub fn remove_from_playlist(core: St, id: i64, pos: usize) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn record_play(core: St, track: Track) -> Res<()> {
-    core.db.record_play(&track).map_err(e)
-}
-
-#[tauri::command]
 pub fn get_history(core: St) -> Res<Vec<Track>> {
     core.db.history(200).map_err(e)
 }
@@ -167,20 +302,6 @@ pub fn delete_download(core: St, id: String) -> Res<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn open_downloads_dir(core: St) -> Res<()> {
-    let dir = core.download_dir();
-    std::fs::create_dir_all(&dir).map_err(e)?;
-    #[cfg(windows)]
-    let opener = "explorer";
-    #[cfg(target_os = "macos")]
-    let opener = "open";
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let opener = "xdg-open";
-    std::process::Command::new(opener).arg(&dir).spawn().map_err(e)?;
-    Ok(())
-}
-
 // ------------------------------------------------------------- settings & account
 #[tauri::command]
 pub async fn get_settings(core: St<'_>) -> Res<Settings> {
@@ -197,6 +318,21 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
         account_name: core.db.get_setting("account_name"),
         ytdlp,
         ytdlp_supported: cfg!(desktop),
+        download_quality: match core.download_codec() {
+            Codec::Aac => "aac".into(),
+            Codec::Opus => "opus".into(),
+        },
+        google_login_supported: cfg!(desktop),
+        chart_region: chart_region(&core),
+        detected_region: detected_region(),
+        notify_tracks: crate::integrations::enabled(&core, "notify_tracks"),
+        discord_presence: crate::integrations::enabled(&core, "discord_presence"),
+        #[cfg(desktop)]
+        discord_available: !crate::integrations::DISCORD_CLIENT_ID.is_empty(),
+        #[cfg(mobile)]
+        discord_available: false,
+        global_hotkeys: crate::integrations::enabled(&core, "global_hotkeys"),
+        hotkeys_supported: cfg!(desktop),
     })
 }
 
@@ -204,7 +340,7 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
 pub fn set_download_dir(core: St, path: String) -> Res<()> {
     let p = std::path::PathBuf::from(path.trim());
     if !p.is_absolute() {
-        return Err("An absolute path is required, e.g. D:\\Music\\YT Music".into());
+        return Err("An absolute path is required, e.g. D:\\YT Music offline".into());
     }
     std::fs::create_dir_all(&p).map_err(e)?;
     core.db.set_setting("download_dir", &p.to_string_lossy()).map_err(e)

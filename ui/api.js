@@ -18,8 +18,26 @@ export const api = {
   artist: (id) => invoke('get_artist', { id }),
   playlist: (id) => invoke('get_playlist', { id }),
   radio: (id) => invoke('get_radio', { id }),
-  lyrics: (id) => invoke('get_lyrics', { id }),
-  prefetch: (id) => invoke('prefetch_stream', { id }),
+  lyrics: (track) => invoke('get_lyrics', { track }),
+  coverColor: (url) => invoke('cover_color', { url }),
+  streamQuality: (id) => invoke('stream_quality', { id }),
+
+  // Player (queue engine lives in Rust)
+  playerState: () => invoke('player_state'),
+  playList: (tracks, start, context) => invoke('player_play_list', { tracks, start, context }),
+  playNext: (tracks) => invoke('player_play_next', { tracks }),
+  addQueue: (tracks) => invoke('player_add_queue', { tracks }),
+  queueRemove: (index) => invoke('player_remove', { index }),
+  queueJump: (index) => invoke('player_jump', { index }),
+  next: (auto) => invoke('player_next', { auto }),
+  prev: (position) => invoke('player_prev', { position }),
+  toggleShuffle: () => invoke('player_toggle_shuffle'),
+  cycleRepeat: () => invoke('player_cycle_repeat'),
+  setAutoplay: (on) => invoke('player_set_autoplay', { on }),
+  setSleepTimer: (minutes, endOfTrack = false) => invoke('set_sleep_timer', { minutes, endOfTrack }),
+  sleepState: () => invoke('sleep_timer_state'),
+  presence: (playing, position) => invoke('presence', { playing, position }),
+  setToggle: (key, on) => invoke('set_toggle', { key, on }),
 
   // Library
   likedTracks: () => invoke('liked_tracks'),
@@ -32,7 +50,6 @@ export const api = {
   deletePlaylist: (id) => invoke('delete_playlist', { id }),
   addToPlaylist: (id, tracks) => invoke('add_to_playlist', { id, tracks }),
   removeFromPlaylist: (id, pos) => invoke('remove_from_playlist', { id, pos }),
-  recordPlay: (track) => invoke('record_play', { track }),
   history: () => invoke('get_history'),
 
   // Downloads
@@ -40,14 +57,20 @@ export const api = {
   downloads: () => invoke('list_downloads'),
   downloadedIds: () => invoke('downloaded_ids'),
   deleteDownload: (id) => invoke('delete_download', { id }),
-  openDownloadsDir: () => invoke('open_downloads_dir'),
 
   // Account & settings
   settings: () => invoke('get_settings'),
   setDownloadDir: (path) => invoke('set_download_dir', { path }),
+  setDownloadQuality: (quality) => invoke('set_download_quality', { quality }),
+  setChartRegion: (region) => invoke('set_chart_region', { region }),
+  googleLogin: () => invoke('google_login'),
   login: (text) => invoke('login_cookies', { text }),
   logout: () => invoke('logout'),
   syncAccount: () => invoke('sync_account'),
   remotePlaylists: () => invoke('remote_playlists'),
   installYtdlp: () => invoke('install_ytdlp'),
+
+  // Updates (desktop: verified self-update; Android: opens the new APK)
+  checkUpdate: () => invoke('check_update'),
+  installUpdate: () => invoke('install_update'),
 };

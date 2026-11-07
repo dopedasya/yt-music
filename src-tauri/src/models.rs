@@ -24,17 +24,7 @@ pub struct Track {
     pub cover: Option<String>,
 }
 
-impl Track {
-    pub fn artist_line(&self) -> String {
-        self.artists
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AlbumCard {
     pub id: String,
     pub title: String,
@@ -44,7 +34,7 @@ pub struct AlbumCard {
     pub kind: String,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ArtistCard {
     pub id: String,
     pub name: String,
@@ -105,16 +95,18 @@ pub struct PlaylistPage {
     pub tracks: Vec<Track>,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct HomeSection {
+    /// i18n key, e.g. "your_mix"; `param` fills `{name}` ("More like {name}").
     pub title: String,
+    pub param: Option<String>,
     pub tracks: Vec<Track>,
     pub albums: Vec<AlbumCard>,
     pub playlists: Vec<PlaylistCard>,
     pub artists: Vec<ArtistCard>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Home {
     pub sections: Vec<HomeSection>,
 }
@@ -146,6 +138,16 @@ pub struct DownloadEntry {
     pub path: String,
     pub size: u64,
     pub ts: i64,
+    pub codec: Option<String>,
+    pub kbps: Option<u32>,
+}
+
+/// What is playing right now and in what quality (shown as a badge in the player).
+#[derive(Serialize)]
+pub struct StreamQuality {
+    pub codec: Option<String>,
+    pub kbps: Option<u32>,
+    pub offline: bool,
 }
 
 #[derive(Serialize)]
@@ -156,6 +158,20 @@ pub struct Settings {
     pub ytdlp: Option<String>,
     /// yt-dlp only exists on desktop; the UI hides its section elsewhere.
     pub ytdlp_supported: bool,
+    /// "opus" or "aac".
+    pub download_quality: String,
+    /// The Google sign-in window is desktop-only for now.
+    pub google_login_supported: bool,
+    /// "auto" or a country code used for charts ("US", "GB", ...).
+    pub chart_region: String,
+    /// Country detected from the OS regional settings (used when "auto").
+    pub detected_region: String,
+    pub notify_tracks: bool,
+    pub discord_presence: bool,
+    /// False when this build has no Discord application id.
+    pub discord_available: bool,
+    pub global_hotkeys: bool,
+    pub hotkeys_supported: bool,
 }
 
 #[derive(Serialize)]

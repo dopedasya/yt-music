@@ -14,10 +14,45 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// Audio codec of a YouTube stream. AAC (m4a) plays everywhere; Opus (webm) sounds
+/// better at the same bitrate (~160 kbps vs 128 kbps AAC).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Codec {
+    Aac,
+    Opus,
+}
+
+impl Codec {
+    fn from_mime(mime: &str) -> Self {
+        if mime.contains("opus") || mime.contains("webm") { Codec::Opus } else { Codec::Aac }
+    }
+    fn mime_prefix(self) -> &'static str {
+        match self {
+            Codec::Aac => "audio/mp4",
+            Codec::Opus => "audio/webm",
+        }
+    }
+    fn ytdlp_format(self) -> &'static str {
+        match self {
+            Codec::Aac => "bestaudio[ext=m4a]/bestaudio",
+            Codec::Opus => "bestaudio[acodec=opus]/bestaudio",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Codec::Aac => "AAC",
+            Codec::Opus => "Opus",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct StreamInfo {
     pub url: String,
     pub mime: String,
+    pub codec: Codec,
+    pub kbps: Option<u32>,
     pub size: Option<u64>,
     pub expires: Instant,
 }
@@ -25,7 +60,7 @@ pub struct StreamInfo {
 pub struct Yt {
     pub rp: RustyPipe,
     http: reqwest::Client,
-    streams: Mutex<HashMap<String, StreamInfo>>,
+    streams: Mutex<HashMap<(String, Codec), StreamInfo>>,
     pub ytdlp_dir: PathBuf,
 }
 
@@ -102,7 +137,7 @@ pub fn playlist_card(p: MusicPlaylistItem) -> PlaylistCard {
     }
 }
 
-fn pick_audio(streams: &[AudioStream], prefer_m4a: bool) -> Option<&AudioStream> {
+fn pick_audio(streams: &[AudioStream], codec: Codec) -> Option<&AudioStream> {
     let usable = || {
         streams
             .iter()
@@ -110,22 +145,37 @@ fn pick_audio(streams: &[AudioStream], prefer_m4a: bool) -> Option<&AudioStream>
             // multi-language videos: skip dubbed tracks
             .filter(|s| s.track.as_ref().is_none_or(|t| t.is_default))
     };
-    if prefer_m4a
-        && let Some(s) = usable()
-            .filter(|s| s.format == AudioFormat::M4a)
-            .max_by_key(|s| s.bitrate)
-    {
-        return Some(s);
-    }
-    usable().max_by_key(|s| s.bitrate)
+    let wanted = match codec {
+        Codec::Aac => AudioFormat::M4a,
+        Codec::Opus => AudioFormat::Webm,
+    };
+    usable()
+        .filter(|s| s.format == wanted)
+        .max_by_key(|s| s.bitrate)
+        .or_else(|| usable().max_by_key(|s| s.bitrate))
+}
+
+/// Parse a two-letter country code into rustypipe's `Country` (serialized as e.g. "US").
+fn serde_plain_country(code: &str) -> Result<rustypipe::param::Country> {
+    Ok(serde_json::from_value(serde_json::Value::String(code.to_uppercase()))?)
 }
 
 impl Yt {
-    pub fn new(storage: PathBuf, ytdlp_dir: PathBuf) -> Result<Self> {
-        let rp = RustyPipe::builder()
+    /// `session_key` encrypts rustypipe's cache (it holds the YouTube login session).
+    pub fn new(storage: PathBuf, ytdlp_dir: PathBuf, session_key: &crate::secrets::Key) -> Result<Self> {
+        std::fs::create_dir_all(&storage)?;
+        let secure = crate::secure_store::SecureStorage::new(storage.clone(), session_key);
+        let mut b = RustyPipe::builder()
             .storage_dir(storage)
-            .timeout(Duration::from_secs(20))
-            .build()?;
+            .storage(Box::new(secure))
+            .timeout(Duration::from_secs(20));
+        // YTUBEM_COUNTRY (e.g. "US") overrides the region used for charts/new releases.
+        if let Ok(c) = std::env::var("YTUBEM_COUNTRY")
+            && let Ok(country) = serde_plain_country(&c)
+        {
+            b = b.country(country);
+        }
+        let rp = b.build()?;
         let http = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
         Ok(Self { rp, http, streams: Mutex::new(HashMap::new()), ytdlp_dir })
     }
@@ -158,9 +208,10 @@ impl Yt {
         Ok(self.rp.query().music_search_suggestion(q).await?.terms)
     }
 
-    pub async fn home(&self) -> Result<Home> {
+    /// Home feed. Charts follow chart_region (e.g. "US"); new releases follow YouTube's own geo.
+    pub async fn home(&self, chart_region: &str) -> Result<Home> {
         let qr = self.rp.query();
-        let (charts, new) = tokio::join!(qr.music_charts(None), qr.music_new_albums());
+        let (charts, new) = tokio::join!(qr.music_charts(serde_plain_country(chart_region).ok()), qr.music_new_albums());
         let mut sections = Vec::new();
         if let Ok(n) = new
             && !n.is_empty()
@@ -333,15 +384,16 @@ impl Yt {
 
     // ------------------------------------------------------------ streams
     pub fn invalidate(&self, id: &str) {
-        self.streams.lock().unwrap().remove(id);
+        self.streams.lock().unwrap().retain(|(k, _), _| k != id);
     }
 
-    /// Resolve a playable audio URL (m4a preferred, so the same URL serves downloads),
+    /// Resolve an audio URL in the requested codec (falls back to whatever exists),
     /// cached until shortly before it expires.
     ///
     /// The visionOS innertube call and rustypipe race; the first *verified* URL wins.
-    pub async fn stream(&self, id: &str) -> Result<StreamInfo> {
-        if let Some(s) = self.streams.lock().unwrap().get(id)
+    pub async fn stream(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
+        let key = (id.to_string(), codec);
+        if let Some(s) = self.streams.lock().unwrap().get(&key)
             && s.expires > Instant::now()
         {
             return Ok(s.clone());
@@ -349,22 +401,22 @@ impl Yt {
         type Fut<'a> = Pin<Box<dyn Future<Output = Result<StreamInfo>> + Send + 'a>>;
         // Pure-Rust resolvers first (~0.1 s); yt-dlp (~3 s, desktop only) is the safety net
         // for when YouTube breaks them and yt-dlp has already caught up.
-        let native: Vec<Fut> = vec![Box::pin(self.stream_native(id)), Box::pin(self.stream_rustypipe(id))];
+        let native: Vec<Fut> = vec![Box::pin(self.stream_native(id, codec)), Box::pin(self.stream_rustypipe(id, codec))];
         let resolved = match futures_util::future::select_ok(native).await {
             Ok((s, _rest)) => s,
             Err(e) if cfg!(desktop) => {
                 eprintln!("native stream resolvers failed for {id}: {e:#}; trying yt-dlp");
-                self.stream_ytdlp(id).await.context("couldn't get an audio stream")?
+                self.stream_ytdlp(id, codec).await.context("couldn't get an audio stream")?
             }
             Err(e) => return Err(e.context("couldn't get an audio stream")),
         };
-        self.streams.lock().unwrap().insert(id.to_string(), resolved.clone());
+        self.streams.lock().unwrap().insert(key, resolved.clone());
         Ok(resolved)
     }
 
-    async fn stream_rustypipe(&self, id: &str) -> Result<StreamInfo> {
+    async fn stream_rustypipe(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
         let p = self.rp.query().player(id).await?;
-        let s = pick_audio(&p.audio_streams, true).ok_or_else(|| anyhow!("no audio stream"))?;
+        let s = pick_audio(&p.audio_streams, codec).ok_or_else(|| anyhow!("no audio stream"))?;
         // Without a PO token YouTube serves only the first ~1 MB and then 403s,
         // which would cut playback mid-track. Probe the tail before trusting the URL.
         if s.size > 1_200_000 {
@@ -375,9 +427,12 @@ impl Yt {
             }
         }
         let ttl = (p.expires_in_seconds as u64).saturating_sub(600).max(300);
+        let mime = s.mime.split(';').next().unwrap_or("audio/mp4").to_string();
         Ok(StreamInfo {
             url: s.url.clone(),
-            mime: s.mime.split(';').next().unwrap_or("audio/mp4").to_string(),
+            codec: Codec::from_mime(&s.mime),
+            kbps: Some(s.average_bitrate.max(s.bitrate) / 1000).filter(|&k| k > 0),
+            mime,
             size: Some(s.size).filter(|&n| n > 0),
             expires: Instant::now() + Duration::from_secs(ttl),
         })
@@ -386,7 +441,7 @@ impl Yt {
     /// Direct innertube `player` call with the visionOS client — the same trick yt-dlp uses.
     /// This client needs no JS player (no signature/n deobfuscation) and no PO token,
     /// so it works in pure Rust everywhere, including Android.
-    async fn stream_native(&self, id: &str) -> Result<StreamInfo> {
+    async fn stream_native(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
         const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
         let visitor = self.rp.query().get_visitor_data(false).await?;
         let body = serde_json::json!({
@@ -438,9 +493,10 @@ impl Yt {
                 && f["audioTrack"]["audioIsDefault"].as_bool().unwrap_or(true)
         });
         let bitrate = |f: &&serde_json::Value| f["bitrate"].as_u64().unwrap_or(0);
+        let wanted = codec.mime_prefix();
         let best = audio
             .clone()
-            .filter(|f| f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/mp4")))
+            .filter(|f| f["mimeType"].as_str().is_some_and(|m| m.starts_with(wanted)))
             .max_by_key(bitrate)
             .or_else(|| audio.max_by_key(bitrate))
             .ok_or_else(|| anyhow!("visionOS: no audio stream"))?;
@@ -450,19 +506,25 @@ impl Yt {
             .unwrap_or(21540)
             .saturating_sub(600)
             .max(300);
+        let mime_full = best["mimeType"].as_str().unwrap_or("audio/mp4");
+        let avg = best["averageBitrate"].as_u64().or_else(|| best["bitrate"].as_u64());
         Ok(StreamInfo {
             url: best["url"].as_str().unwrap_or_default().to_string(),
-            mime: best["mimeType"].as_str().unwrap_or("audio/mp4").split(';').next().unwrap_or("audio/mp4").to_string(),
+            mime: mime_full.split(';').next().unwrap_or("audio/mp4").to_string(),
+            codec: Codec::from_mime(mime_full),
+            kbps: avg.map(|b| (b / 1000) as u32),
             size: best["contentLength"].as_str().and_then(|s| s.parse().ok()),
             expires: Instant::now() + Duration::from_secs(ttl),
         })
     }
 
-    async fn stream_ytdlp(&self, id: &str) -> Result<StreamInfo> {
-        let url = ytdlp::get_url(&self.ytdlp_dir, id).await?;
+    async fn stream_ytdlp(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
+        let url = ytdlp::get_url(&self.ytdlp_dir, id, codec.ytdlp_format()).await?;
         let mime = if url.contains("mime=audio%2Fwebm") { "audio/webm" } else { "audio/mp4" };
         Ok(StreamInfo {
             url,
+            codec: Codec::from_mime(mime),
+            kbps: None,
             mime: mime.into(),
             size: None,
             expires: Instant::now() + Duration::from_secs(3 * 3600),
@@ -479,11 +541,11 @@ mod live_tests {
     #[ignore]
     async fn live_smoke() {
         let dir = std::env::temp_dir().join("ytubem-test");
-        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let yt = Yt::new(dir.join("rp"), dir.join("bin"), &[0u8; 32]).unwrap();
         let r = yt.search("Океан Ельзи").await.unwrap();
         println!("tracks={} albums={} artists={} playlists={}", r.tracks.len(), r.albums.len(), r.artists.len(), r.playlists.len());
         let t = &r.tracks[0];
-        println!("first: {} - {} ({:?})", t.artist_line(), t.title, t.duration);
+        println!("first: {} ({:?})", t.title, t.duration);
         println!("suggest: {:?}", yt.suggestions("океан").await.unwrap());
         let a = yt.album(&r.albums[0].id).await.unwrap();
         println!("album: {} tracks={}", a.title, a.tracks.len());
@@ -491,16 +553,16 @@ mod live_tests {
         println!("artist: {} top={} albums={} singles={}", ar.name, ar.tracks.len(), ar.albums.len(), ar.singles.len());
         println!("radio: {}", yt.radio(&t.id).await.unwrap().len());
         println!("lyrics: {}", yt.lyrics(&t.id).await.unwrap().is_some());
-        let home = yt.home().await.unwrap();
+        let home = yt.home("US").await.unwrap();
         println!("home: {:?}", home.sections.iter().map(|s| &s.title).collect::<Vec<_>>());
         let pl = yt.playlist(&r.playlists[0].id, false).await.unwrap();
         println!("playlist: {} tracks={}", pl.title, pl.tracks.len());
 
         let start = Instant::now();
-        let s = yt.stream(&t.id).await.unwrap();
+        let s = yt.stream(&t.id, Codec::Aac).await.unwrap();
         println!("stream mime={} size={:?} in {:?}", s.mime, s.size, start.elapsed());
         let start = Instant::now();
-        yt.stream(&t.id).await.unwrap();
+        yt.stream(&t.id, Codec::Aac).await.unwrap();
         println!("cached in {:?}", start.elapsed());
     }
 }
@@ -511,11 +573,11 @@ mod native_tests {
     #[ignore]
     async fn live_native_stream() {
         let dir = std::env::temp_dir().join("ytubem-test");
-        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let yt = Yt::new(dir.join("rp"), dir.join("bin"), &[0u8; 32]).unwrap();
         let c = reqwest::Client::new();
         for id in ["8wWrzr3_46Y", "1BdGqKO3ERY", "dQw4w9WgXcQ"] {
             let t = Instant::now();
-            match yt.stream_native(id).await {
+            match yt.stream_native(id, Codec::Opus).await {
                 Ok(s) => {
                     let el = t.elapsed();
                     let size = s.size.unwrap_or(0);

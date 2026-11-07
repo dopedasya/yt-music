@@ -1,6 +1,6 @@
 [package]
 name = "ytubem"
-version = "0.3.0"
+version = "0.3.3"
 edition = "2024"
 description = "Fast unofficial YouTube Music client"
 license = "GPL-3.0-only"
@@ -13,22 +13,45 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 anyhow = "1.0.104"
 axum = "0.8.9"
+chacha20 = "0.9"
 futures-util = "0.3.34"
-lofty = "0.25.5"
+getrandom = "0.3"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-webpki-roots", "userdata"] }
 serde = { version = "1.0.229", features = ["derive"] }
+semver = "1"
 serde_json = "1.0.154"
+sha2 = "0.10"
+tauri-plugin-opener = "2"
 tauri = { version = "2", features = [] }
 tokio = { version = "1.54.1", features = ["full"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs"] }
+url = "2.5.8"
+chacha20poly1305 = "0.10"
+sys-locale = "0.3"
+tauri-plugin-notification = "2"
 
 # rquickjs-sys (pulled in by rustypipe) ships no prebuilt bindings for Android;
 # generate them with bindgen there. Needs libclang (LIBCLANG_PATH) at build time.
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs-sys = { version = "0.9", features = ["bindgen"] }
+
+# OS secret store for keys: Windows Credential Manager / macOS Keychain.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+
+# Self-update (download, verify signature, install, restart) on desktop only;
+# Android updates by downloading the new APK.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-global-shortcut = "2"
+discord-rich-presence = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

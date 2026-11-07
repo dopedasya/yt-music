@@ -401,3 +401,57 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 4px; font-size:
 .lib-page-head h1 { font-size: 24px; }
 .library-page .lib-item { padding: 8px 4px; }
 .library-page .lib-cover { width: 56px; height: 56px; }
+
+/* ------------------------------------------------------------ cover-tinted pages (colour from Rust) */
+#main { --page-color: #2a2a35; transition: background-color .4s; }
+#main.tinted { background:
+  linear-gradient(180deg, var(--page-color) 0, color-mix(in srgb, var(--page-color) 45%, var(--panel)) 260px, var(--panel) 560px) no-repeat,
+  var(--panel); }
+#main.tinted #topbar.scrolled { background: color-mix(in srgb, var(--page-color) 55%, #0b0b0e); }
+#main.tinted .thead { background: transparent; }
+#main.tinted .hero-art { box-shadow: 0 16px 60px #0009; }
+#main.tinted .artist-hero { background: linear-gradient(transparent 20%, #000a), var(--bg-img, var(--page-color)) center 25% / cover; }
+
+/* ------------------------------------------------------------ lyrics (Spotify-style) */
+#main.lyrics-mode, #main.lyrics-mode.tinted { background: var(--page-color); transition: background-color .6s; }
+#main.lyrics-mode #topbar.scrolled { background: color-mix(in srgb, var(--page-color) 80%, #000); box-shadow: none; }
+.lyrics-page { max-width: 900px; padding: 8px 8px 30vh; }
+.ly-head { display: flex; align-items: center; gap: 14px; margin: 4px 0 28px; }
+.ly-head img { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; box-shadow: 0 6px 20px #0006; }
+.ly-head div { display: flex; flex-direction: column; }
+.ly-head b { font-size: 16px; }
+.ly-head span { color: #ffffffb0; font-size: 13px; }
+.ly-lines { display: flex; flex-direction: column; gap: 6px; }
+.ly-line { margin: 0; font-size: clamp(22px, 3vw, 32px); font-weight: 800; line-height: 1.3; letter-spacing: -0.01em;
+  color: #00000080; cursor: pointer; transition: color .25s, transform .25s; transform-origin: left center; user-select: text; }
+.ly-line:hover { color: #ffffffd0; }
+.ly-line.past { color: #ffffffa8; }
+.ly-line.active { color: #fff; }
+.ly-line.gap { font-size: 22px; }
+.ly-plain { font-size: clamp(20px, 2.6vw, 28px); font-weight: 800; line-height: 1.5; color: #fff; user-select: text; }
+.ly-empty { font-size: 24px; font-weight: 700; margin-top: 18vh; text-align: center; }
+.ly-source { color: #ffffff99; font-size: 13px; margin-top: 40px; }
+@media (prefers-reduced-motion: reduce) { .ly-line { transition: none; } }
+
+/* ------------------------------------------------------------ quality badges */
+.qpill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  color: var(--muted); border: 1px solid #ffffff2a; border-radius: 4px; padding: 2px 6px; margin-right: 6px; white-space: nowrap; }
+.qpill:empty { display: none; }
+.qpill.offline { color: var(--ok); border-color: #3ddc8466; }
+.qpill .ic, .hero-meta .ic { width: 12px; height: 12px; vertical-align: -1px; }
+.qbadge { font-size: 10.5px; font-weight: 700; color: var(--muted); border: 1px solid #ffffff26; border-radius: 3px; padding: 0 4px; margin-right: 4px; flex: none; }
+
+/* ------------------------------------------------------------ settings: google + quality */
+.google-btn { display: inline-flex; align-items: center; gap: 12px; background: #fff; color: #1f1f1f; border: 0; border-radius: 999px;
+  padding: 10px 22px 10px 14px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 8px #0005; transition: transform .1s, box-shadow .1s; }
+.google-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 18px #0007; }
+.google-btn .g-logo { width: 20px; height: 20px; }
+.advanced { margin-top: 18px; }
+.advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.advanced[open] summary { margin-bottom: 8px; }
+.seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0 16px; }
+.seg-opt { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 12px 40px; border-radius: 10px;
+  background: var(--hover); border: 2px solid transparent; cursor: pointer; }
+.seg-opt input { position: absolute; left: 14px; top: 15px; accent-color: var(--accent); width: 16px; height: 16px; }
+.seg-opt small { color: var(--muted); }
+.seg-opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--hover)); }

@@ -54,8 +54,12 @@ impl Db {
                 ts INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts INTEGER NOT NULL);
             "#,
         )?;
+        // v0.3: audio quality of downloads. ALTER fails harmlessly if the column exists.
+        let _ = conn.execute("ALTER TABLE downloads ADD COLUMN codec TEXT", []);
+        let _ = conn.execute("ALTER TABLE downloads ADD COLUMN kbps INTEGER", []);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -248,12 +252,38 @@ impl Db {
     }
 
     // ---- downloads
-    pub fn add_download(&self, t: &Track, path: &str, size: u64) -> Result<()> {
+    pub fn add_download(&self, t: &Track, path: &str, size: u64, codec: &str, kbps: Option<u32>) -> Result<()> {
         let conn = self.c();
         Self::upsert_track(&conn, t)?;
         conn.execute(
-            "INSERT OR REPLACE INTO downloads(track_id, path, size, ts) VALUES (?1, ?2, ?3, ?4)",
-            params![t.id, path, size as i64, now()],
+            "INSERT OR REPLACE INTO downloads(track_id, path, size, ts, codec, kbps) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![t.id, path, size as i64, now(), codec, kbps],
+        )?;
+        Ok(())
+    }
+
+    /// Quality of a downloaded file: (codec, kbps).
+    pub fn download_quality(&self, id: &str) -> Option<(Option<String>, Option<u32>)> {
+        self.c()
+            .query_row("SELECT codec, kbps FROM downloads WHERE track_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    // ---- cache (cover colours, lyrics): small JSON values keyed by string
+    pub fn cache_get(&self, key: &str) -> Option<String> {
+        self.c()
+            .query_row("SELECT value FROM cache WHERE key = ?1", [key], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn cache_put(&self, key: &str, value: &str) -> Result<()> {
+        self.c().execute(
+            "INSERT OR REPLACE INTO cache(key, value, ts) VALUES (?1, ?2, ?3)",
+            params![key, value, now()],
         )?;
         Ok(())
     }
@@ -275,7 +305,7 @@ impl Db {
     pub fn downloads(&self) -> Result<Vec<DownloadEntry>> {
         let conn = self.c();
         let mut st = conn.prepare(
-            "SELECT t.data, d.path, d.size, d.ts FROM downloads d JOIN tracks t ON t.id = d.track_id
+            "SELECT t.data, d.path, d.size, d.ts, d.codec, d.kbps FROM downloads d JOIN tracks t ON t.id = d.track_id
              ORDER BY d.ts DESC",
         )?;
         let rows = st.query_map([], |r| {
@@ -284,12 +314,16 @@ impl Db {
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
                 r.get::<_, i64>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<u32>>(5)?,
             ))
         })?;
         Ok(rows
             .filter_map(|r| r.ok())
-            .filter_map(|(d, path, size, ts)| {
-                Some(DownloadEntry { track: track_from_json(d)?, path, size: size as u64, ts })
+            .filter_map(|(d, path, size, ts, codec, kbps)| {
+                // Older downloads (before quality tracking) were always AAC m4a.
+                let codec = codec.or_else(|| path.ends_with(".m4a").then(|| "AAC".to_string()));
+                Some(DownloadEntry { track: track_from_json(d)?, path, size: size as u64, ts, codec, kbps })
             })
             .collect())
     }

@@ -12,10 +12,11 @@ A fast, unofficial YouTube Music desktop client written in Rust (Tauri 2). Searc
 - Album, artist and playlist pages
 - Player with queue, shuffle, repeat (all / one), seeking, volume and media keys
 - Autoplay: when the queue runs out, similar songs (radio) are added
-- Lyrics
+- Time-synced lyrics (Spotify-style: the current line lights up, click a line to jump), from [LRCLIB](https://lrclib.net) with YouTube Music lyrics as fallback
+- Pages tinted with the cover's colour (computed in Rust)
 - Library: liked songs, your own playlists and history, stored locally in SQLite
-- Offline downloads as `.m4a` with tags and cover art; downloaded songs play without internet
-- YouTube Music account (via cookies): import your liked songs and playlists
+- Offline downloads in high quality (Opus ~160 kbps, or AAC ~128 kbps), stored encrypted in our own `.ytmc` format like Spotify's offline cache, so they play only inside the app
+- Sign in with Google to import your YouTube Music likes and playlists
 - Interface in English, Ukrainian and Russian
 - Small and fast: ~14 MB binary, a song starts in ~0.2 s
 
@@ -26,7 +27,7 @@ Grab the installer for your platform from [Releases](../../releases).
 - **Windows**: `YT Music_x.y.z_x64-setup.exe`
 - **macOS**: `.dmg` (Apple Silicon and Intel). The app isn't notarized, so on first launch right-click it and choose **Open**.
 - **Linux**: `.AppImage` / `.deb`
-- **Android**: coming soon
+- **Android**: `*_android-arm64.apk` (allow installing from unknown sources)
 
 ## Build from source
 
@@ -43,16 +44,23 @@ The frontend is plain HTML/CSS/JS in `ui/`, so no Node.js or bundler is needed.
 
 ## How it works
 
+Most of the app is Rust; the web layer only renders and plays `<audio>`.
+
 ```
-ui/                 frontend (no build step): app.js, player.js, api.js, i18n.js, icons.js
+ui/                 frontend (no build step): app.js, player.js (thin), api.js, i18n.js, icons.js
 src-tauri/src/
-  main.rs           startup, command registration
-  commands.rs       Tauri commands called by the UI
+  lib.rs            startup, command registration (desktop + Android entry point)
+  player.rs         queue engine: shuffle, repeat, autoplay radio, persistence
+  playback.rs       player commands; records history, prefetches the next stream
   yt.rs             YouTube Music metadata (rustypipe) + audio stream resolution
-  server.rs         local 127.0.0.1 HTTP proxy for <audio> (Range requests / seeking)
-  downloads.rs      chunked downloads + tagging (lofty)
-  db.rs             SQLite: likes, playlists, history, downloads, settings
-  ytdlp.rs          optional yt-dlp fallback (desktop only)
+  lyrics.rs         LRCLIB lookup, fuzzy matching, LRC parsing
+  color.rs          dominant cover colour for page tints
+  vault.rs          encrypted offline container (.ytmc, ChaCha20, seekable)
+  downloads.rs      chunked downloads straight into the vault
+  server.rs         local 127.0.0.1 HTTP server for <audio> (Range/seeking, decrypts offline files)
+  auth.rs           "Sign in with Google" window
+  db.rs             SQLite: likes, playlists, history, downloads, cache, settings
+  ytdlp.rs          optional yt-dlp fallback (desktop only, checksum-verified)
 ```
 
 - **Metadata** (search, albums, artists, radio, lyrics, account) comes from [rustypipe](https://codeberg.org/ThetaDev/rustypipe).

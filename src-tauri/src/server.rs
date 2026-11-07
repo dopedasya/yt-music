@@ -5,7 +5,8 @@
 //! googlevideo rejects open-ended ranges (`bytes=0-`, which is what Chromium sends),
 //! so the proxy always fetches upstream in bounded chunks and stitches them together.
 use crate::state::Core;
-use crate::yt::StreamInfo;
+use crate::vault;
+use crate::yt::{Codec, StreamInfo};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -171,7 +172,62 @@ async fn proxy(core: &Core, info: &StreamInfo, range: Option<&str>) -> Result<Re
     Ok(resp)
 }
 
+/// Decrypt a `.ytmc` file on the fly, honouring Range so seeking works offline.
+async fn serve_vault(core: &Core, path: &str, range: Option<&str>) -> anyhow::Result<Response> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let h = vault::read_header(&mut file).await?;
+    let total = file.metadata().await?.len().saturating_sub(h.data_start);
+    let (start, end) = match range {
+        Some(r) => match parse_range(r, total) {
+            Some(x) => x,
+            None => {
+                return Ok((
+                    StatusCode::RANGE_NOT_SATISFIABLE,
+                    [(header::CONTENT_RANGE, format!("bytes */{total}"))],
+                )
+                    .into_response());
+            }
+        },
+        None => (0, total.saturating_sub(1)),
+    };
+    let len = end + 1 - start;
+    let reader = vault::RangeReader::open(file, &h, &core.vault_key()?, start, len).await?;
+    let body = futures_util::stream::unfold(reader, |mut r| async move {
+        match r.next_chunk().await {
+            Ok(Some(c)) => Some((Ok::<_, std::io::Error>(bytes_from(c)), r)),
+            Ok(None) => None,
+            Err(e) => Some((Err(std::io::Error::other(e)), r)),
+        }
+    });
+    let mut resp = Response::new(Body::from_stream(body));
+    *resp.status_mut() = if range.is_some() { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK };
+    let hd = resp.headers_mut();
+    hd.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
+    if range.is_some() {
+        hd.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {start}-{end}/{total}"))?);
+    }
+    hd.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    hd.insert(header::CONTENT_TYPE, HeaderValue::from_str(&h.mime)?);
+    Ok(resp)
+}
+
+fn bytes_from(v: Vec<u8>) -> axum::body::Bytes {
+    axum::body::Bytes::from(v)
+}
+
+/// Only answer requests addressed to the loopback host. A web page could otherwise use
+/// DNS rebinding (evil.com → 127.0.0.1) to read responses from this server.
+fn local_host(req: &Request, port: u16) -> bool {
+    let Some(host) = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()) else {
+        return false;
+    };
+    host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
+}
+
 async fn stream(State(core): State<Arc<Core>>, Path(id): Path<String>, req: Request) -> Response {
+    if !local_host(&req, core.port.load(std::sync::atomic::Ordering::Relaxed)) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     if !valid_id(&id) {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -180,6 +236,14 @@ async fn stream(State(core): State<Arc<Core>>, Path(id): Path<String>, req: Requ
     if let Some(path) = core.db.download_path(&id)
         && std::path::Path::new(&path).is_file()
     {
+        if path.ends_with(&format!(".{}", vault::EXT)) {
+            let range = req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_owned);
+            return match serve_vault(&core, &path, range.as_deref()).await {
+                Ok(r) => r,
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+            };
+        }
+        // plain files from older versions
         return match ServeFile::new(&path).oneshot(req).await {
             Ok(r) => r.map(Body::new).into_response(),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -193,9 +257,10 @@ async fn stream(State(core): State<Arc<Core>>, Path(id): Path<String>, req: Requ
         .map(str::to_owned);
 
     // attempt 0 may use a cached URL; attempt 1 resolves a fresh one.
+    // Streaming uses AAC: it plays in every webview (WKWebView included).
     let mut last_err = String::from("stream unavailable");
     for _ in 0..2 {
-        let info = match core.yt.stream(&id).await {
+        let info = match core.yt.stream(&id, Codec::Aac).await {
             Ok(i) => i,
             Err(e) => {
                 last_err = format!("{e:#}");
@@ -240,6 +305,13 @@ mod live_tests {
         let core = crate::state::test_core();
         let id = core.yt.search("Океан Ельзи Обійми").await.unwrap().tracks[0].id.clone();
         let port = start(core.clone()).await.unwrap();
+        core.port.store(port, std::sync::atomic::Ordering::Relaxed);
+        // foreign Host header (DNS rebinding) must be refused
+        let evil = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/stream/{id}"))
+            .header("Host", format!("evil.example:{port}"))
+            .send().await.unwrap();
+        assert_eq!(evil.status(), 403);
         let url = format!("http://127.0.0.1:{port}/stream/{id}");
         let http = reqwest::Client::new();
         // what Chromium sends first

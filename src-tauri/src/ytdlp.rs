@@ -38,10 +38,10 @@ fn watch_url(id: &str) -> String {
     format!("https://music.youtube.com/watch?v={id}")
 }
 
-pub async fn get_url(dir: &Path, id: &str) -> Result<String> {
+pub async fn get_url(dir: &Path, id: &str, format: &str) -> Result<String> {
     let bin = find(dir).ok_or_else(|| anyhow!("yt-dlp is not installed"))?;
     let out = cmd(&bin)
-        .args(["-f", "bestaudio[ext=m4a]/bestaudio", "--get-url", "--no-playlist", "--no-warnings"])
+        .args(["-f", format, "--get-url", "--no-playlist", "--no-warnings"])
         .arg(watch_url(id))
         .output()
         .await?;
@@ -56,24 +56,31 @@ pub async fn get_url(dir: &Path, id: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("yt-dlp returned no URL"))
 }
 
-/// Download audio straight to `dest` (m4a preferred so it can be tagged).
-pub async fn download(dir: &Path, id: &str, dest: &Path) -> Result<()> {
-    let bin = find(dir).ok_or_else(|| anyhow!("yt-dlp is not installed"))?;
-    let out = cmd(&bin)
-        .args(["-f", "bestaudio[ext=m4a]/bestaudio", "--no-playlist", "--no-warnings", "--no-part", "-o"])
-        .arg(dest)
-        .arg(watch_url(id))
-        .output()
-        .await?;
-    if !out.status.success() {
-        bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(())
+const SUMS_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS";
+
+/// Expected SHA-256 of `name` from the release's SHA2-256SUMS file.
+async fn expected_sha256(http: &reqwest::Client, name: &str) -> Result<String> {
+    let sums = http.get(SUMS_URL).send().await?.error_for_status()?.text().await?;
+    sums.lines()
+        .find_map(|l| {
+            let (hash, file) = l.split_once(char::is_whitespace)?;
+            (file.trim().trim_start_matches('*') == name).then(|| hash.to_lowercase())
+        })
+        .ok_or_else(|| anyhow!("{name} not listed in SHA2-256SUMS"))
 }
 
+/// Download the latest release binary, verify it against SHA2-256SUMS, then install it.
 pub async fn install(dir: &Path, http: &reqwest::Client) -> Result<PathBuf> {
+    use sha2::{Digest, Sha256};
     tokio::fs::create_dir_all(dir).await?;
-    let bytes = http.get(RELEASE_URL).send().await?.error_for_status()?.bytes().await?;
+    let (bytes, expected) = tokio::try_join!(
+        async { Ok::<_, anyhow::Error>(http.get(RELEASE_URL).send().await?.error_for_status()?.bytes().await?) },
+        expected_sha256(http, EXE),
+    )?;
+    let actual: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+    if actual != expected {
+        bail!("yt-dlp checksum mismatch (expected {expected}, got {actual}); not installing");
+    }
     let tmp = dir.join(format!("{EXE}.tmp"));
     tokio::fs::write(&tmp, &bytes).await?;
     let dest = dir.join(EXE);

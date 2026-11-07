@@ -1,7 +1,8 @@
 //! Tauri commands invoked from the frontend.
 use crate::models::*;
 use crate::state::Core;
-use crate::{downloads, ytdlp};
+use crate::yt::Codec;
+use crate::{color, downloads, lyrics, ytdlp};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, State};
@@ -59,17 +60,68 @@ pub async fn get_radio(core: St<'_>, id: String) -> Res<Vec<Track>> {
     core.yt.radio(&id).await.map_err(e)
 }
 
+/// Synced lyrics (LRCLIB) with YouTube Music's plain lyrics as fallback.
+/// Results are cached in the DB, so lyrics of offline tracks work without internet.
 #[tauri::command]
-pub async fn get_lyrics(core: St<'_>, id: String) -> Res<Option<LyricsOut>> {
-    core.yt.lyrics(&id).await.map_err(e)
+pub async fn get_lyrics(core: St<'_>, track: Track) -> Res<Option<lyrics::Lyrics>> {
+    let key = format!("lyrics:{}", track.id);
+    if let Some(cached) = core.db.cache_get(&key) {
+        return Ok(serde_json::from_str(&cached).ok().flatten());
+    }
+    let (lrc, yt) = tokio::join!(lyrics::lrclib(&core.http, &track), core.yt.lyrics(&track.id));
+    // Both sources answered (even "nothing found") → the result is worth caching.
+    let definite = lrc.is_ok() && yt.is_ok();
+    let found = match lrc {
+        Ok(Some(l)) if !l.synced.is_empty() || l.instrumental => Some(l),
+        other => {
+            let plain_lrc = other.ok().flatten();
+            match yt {
+                Ok(Some(y)) => Some(lyrics::Lyrics {
+                    synced: vec![],
+                    plain: Some(y.body),
+                    source: "YouTube Music".into(),
+                    instrumental: false,
+                }),
+                _ => plain_lrc,
+            }
+        }
+    };
+    // Don't cache after a network error, so it's retried next time.
+    if found.is_some() || definite {
+        let _ = core.db.cache_put(&key, &serde_json::to_string(&found).unwrap_or_default());
+    }
+    Ok(found)
+}
+
+/// Accent colour of a cover image (`#rrggbb`), computed in Rust and cached.
+#[tauri::command]
+pub async fn cover_color(core: St<'_>, url: String) -> Res<String> {
+    let key = format!("color:{url}");
+    if let Some(c) = core.db.cache_get(&key) {
+        return Ok(c);
+    }
+    let bytes = core.http.get(&url).send().await.map_err(e)?.error_for_status().map_err(e)?.bytes().await.map_err(e)?;
+    let c = tokio::task::spawn_blocking(move || color::dominant(&bytes)).await.map_err(e)?.map_err(e)?;
+    let _ = core.db.cache_put(&key, &c);
+    Ok(c)
+}
+
+/// Quality of what is (about to be) played: the offline file, or the AAC stream.
+#[tauri::command]
+pub async fn stream_quality(core: St<'_>, id: String) -> Res<StreamQuality> {
+    if let Some((codec, kbps)) = core.db.download_quality(&id) {
+        return Ok(StreamQuality { codec, kbps, offline: true });
+    }
+    let s = core.yt.stream(&id, Codec::Aac).await.map_err(e)?;
+    Ok(StreamQuality { codec: Some(s.codec.label().into()), kbps: s.kbps, offline: false })
 }
 
 #[tauri::command]
-pub async fn prefetch_stream(core: St<'_>, id: String) -> Res<()> {
-    if core.db.download_path(&id).is_none() {
-        core.yt.stream(&id).await.map_err(e)?;
+pub fn set_download_quality(core: St, quality: String) -> Res<()> {
+    if quality != "opus" && quality != "aac" {
+        return Err("quality must be opus or aac".into());
     }
-    Ok(())
+    core.db.set_setting("download_quality", &quality).map_err(e)
 }
 
 // ------------------------------------------------------------- library
@@ -124,11 +176,6 @@ pub fn remove_from_playlist(core: St, id: i64, pos: usize) -> Res<()> {
 }
 
 #[tauri::command]
-pub fn record_play(core: St, track: Track) -> Res<()> {
-    core.db.record_play(&track).map_err(e)
-}
-
-#[tauri::command]
 pub fn get_history(core: St) -> Res<Vec<Track>> {
     core.db.history(200).map_err(e)
 }
@@ -167,20 +214,6 @@ pub fn delete_download(core: St, id: String) -> Res<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn open_downloads_dir(core: St) -> Res<()> {
-    let dir = core.download_dir();
-    std::fs::create_dir_all(&dir).map_err(e)?;
-    #[cfg(windows)]
-    let opener = "explorer";
-    #[cfg(target_os = "macos")]
-    let opener = "open";
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let opener = "xdg-open";
-    std::process::Command::new(opener).arg(&dir).spawn().map_err(e)?;
-    Ok(())
-}
-
 // ------------------------------------------------------------- settings & account
 #[tauri::command]
 pub async fn get_settings(core: St<'_>) -> Res<Settings> {
@@ -197,6 +230,11 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
         account_name: core.db.get_setting("account_name"),
         ytdlp,
         ytdlp_supported: cfg!(desktop),
+        download_quality: match core.download_codec() {
+            Codec::Aac => "aac".into(),
+            Codec::Opus => "opus".into(),
+        },
+        google_login_supported: cfg!(desktop),
     })
 }
 
@@ -204,7 +242,7 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
 pub fn set_download_dir(core: St, path: String) -> Res<()> {
     let p = std::path::PathBuf::from(path.trim());
     if !p.is_absolute() {
-        return Err("An absolute path is required, e.g. D:\\Music\\YT Music".into());
+        return Err("An absolute path is required, e.g. D:\\YT Music offline".into());
     }
     std::fs::create_dir_all(&p).map_err(e)?;
     core.db.set_setting("download_dir", &p.to_string_lossy()).map_err(e)

@@ -24,16 +24,6 @@ pub struct Track {
     pub cover: Option<String>,
 }
 
-impl Track {
-    pub fn artist_line(&self) -> String {
-        self.artists
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
 #[derive(Serialize, Clone, Debug)]
 pub struct AlbumCard {
     pub id: String,
@@ -146,6 +136,16 @@ pub struct DownloadEntry {
     pub path: String,
     pub size: u64,
     pub ts: i64,
+    pub codec: Option<String>,
+    pub kbps: Option<u32>,
+}
+
+/// What is playing right now and in what quality (shown as a badge in the player).
+#[derive(Serialize)]
+pub struct StreamQuality {
+    pub codec: Option<String>,
+    pub kbps: Option<u32>,
+    pub offline: bool,
 }
 
 #[derive(Serialize)]
@@ -156,6 +156,10 @@ pub struct Settings {
     pub ytdlp: Option<String>,
     /// yt-dlp only exists on desktop; the UI hides its section elsewhere.
     pub ytdlp_supported: bool,
+    /// "opus" or "aac".
+    pub download_quality: String,
+    /// The Google sign-in window is desktop-only for now.
+    pub google_login_supported: bool,
 }
 
 #[derive(Serialize)]

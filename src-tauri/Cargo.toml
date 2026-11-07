@@ -1,6 +1,6 @@
 [package]
 name = "ytubem"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Fast unofficial YouTube Music client"
 license = "GPL-3.0-only"
@@ -13,17 +13,21 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 anyhow = "1.0.104"
 axum = "0.8.9"
+chacha20 = "0.9"
 futures-util = "0.3.34"
-lofty = "0.25.5"
+getrandom = "0.3"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustypipe = { version = "0.11", default-features = false, features = ["rustls-tls-webpki-roots", "userdata"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.10"
 tauri = { version = "2", features = [] }
 tokio = { version = "1.54.1", features = ["full"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs"] }
+url = "2.5.8"
 
 # rquickjs-sys (pulled in by rustypipe) ships no prebuilt bindings for Android;
 # generate them with bindgen there. Needs libclang (LIBCLANG_PATH) at build time.

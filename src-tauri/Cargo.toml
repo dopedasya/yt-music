@@ -6,6 +6,10 @@ description = "Fast unofficial YouTube Music client"
 license = "GPL-3.0-only"
 repository = "https://github.com/neverh8me/yt-music"
 
+[lib]
+name = "ytubem_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [dependencies]
 anyhow = "1.0.104"
 axum = "0.8.9"
@@ -20,6 +24,11 @@ tauri = { version = "2", features = [] }
 tokio = { version = "1.54.1", features = ["full"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs"] }
+
+# rquickjs-sys (pulled in by rustypipe) ships no prebuilt bindings for Android;
+# generate them with bindgen there. Needs libclang (LIBCLANG_PATH) at build time.
+[target.'cfg(target_os = "android")'.dependencies]
+rquickjs-sys = { version = "0.9", features = ["bindgen"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

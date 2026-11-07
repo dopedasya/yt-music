@@ -86,7 +86,7 @@ async function render() {
   const entry = nav.stack[nav.pos];
   const token = ++renderToken;
   const el = $('#view');
-  $$('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.nav === entry.view
+  $$('.nav-item, .tab').forEach((a) => a.classList.toggle('active', a.dataset.nav === entry.view
     || (entry.view === 'local-playlist' && a.dataset.pl == entry.params.id)
     || (entry.view === 'playlist' && a.dataset.rpl === entry.params.id)));
   $('#nav-back').disabled = nav.pos <= 0;
@@ -321,6 +321,24 @@ const views = {
     ${tracks.length ? trackRows(tracks, { ctx: pageCtx }) : `<p class="muted pad">${esc(t('dl.empty'))}</p>`}</div>`;
   },
 
+  // Phone-only screen: on desktop the same list lives in the sidebar.
+  async library() {
+    await refreshLibrary().catch(() => {});
+    const item = (attrs, cover, title, sub) => `<a class="nav-item lib-item" ${attrs}>
+      <span class="lib-cover ${cover.cls || ''}">${cover.img ? `<img src="${esc(cover.img)}" alt="">` : icon(cover.ic || 'music')}</span>
+      <span class="lib-text"><b>${esc(title)}</b><small>${esc(sub)}</small></span></a>`;
+    return `<div class="page library-page">
+      <div class="lib-page-head"><h1>${esc(t('nav.library'))}</h1>
+        <button class="icon-btn big" data-act="new-playlist" title="${esc(t('nav.newPlaylist'))}">${icon('plus')}</button></div>
+      ${item('data-nav="liked"', { cls: 'liked-cover', ic: 'heart-fill' }, t('lib.liked'), `${t('lib.playlist')} · ${tracksLabel(state.liked.size)}`)}
+      ${item('data-nav="downloads"', { cls: 'dl-cover', ic: 'download' }, t('lib.downloads'), `${t('lib.offline')} · ${tracksLabel(state.downloaded.size)}`)}
+      ${item('data-nav="history"', { cls: 'hist-cover', ic: 'history' }, t('lib.history'), t('lib.historySub'))}
+      ${state.playlists.map((p) => item(`data-nav="local-playlist" data-pl="${p.id}"`, { img: p.cover }, p.name, `${t('lib.playlist')} · ${tracksLabel(p.count)}`)).join('')}
+      ${state.remotePlaylists.length ? '<div class="lib-sep">YouTube Music</div>' : ''}
+      ${state.remotePlaylists.map((p) => item(`data-nav="playlist" data-rpl="${esc(p.id)}"`, { img: p.cover }, p.title, p.author || t('lib.playlist'))).join('')}
+    </div>`;
+  },
+
   async history() {
     const tracks = await api.history();
     pageTracks = tracks; pageCtx = null;
@@ -468,7 +486,11 @@ function showMenu(x, y, items) {
 const hideMenu = () => menu.classList.add('hidden');
 menu.addEventListener('click', (e) => {
   const mi = e.target.closest('.mi[data-mi]');
-  if (!mi) return;
+  if (!mi) {
+    // touch screens have no hover: tap opens the submenu
+    e.target.closest('.has-sub')?.classList.toggle('open');
+    return;
+  }
   const items = menu._items;
   const it = mi.dataset.parent != null ? items[mi.dataset.parent].sub[mi.dataset.mi] : items[mi.dataset.mi];
   hideMenu();
@@ -610,6 +632,7 @@ const actions = {
     await refreshLibrary();
     go('home');
   },
+  'new-playlist': () => newPlaylist(),
   'radio-artist': () => { if (pageTracks[0]) startRadio(pageTracks[0]); },
   'q-remove': (el) => { player.removeAt(Number(el.closest('.qrow').dataset.qidx)); },
   'open-dl-dir': () => api.openDownloadsDir().catch((e) => toast(errText(e), 'err')),

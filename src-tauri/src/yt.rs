@@ -1,0 +1,530 @@
+//! YouTube Music access via rustypipe, with yt-dlp as a fallback for stream URLs.
+use crate::models::*;
+use crate::ytdlp;
+use anyhow::{Context, Result, anyhow, bail};
+use rustypipe::client::RustyPipe;
+use rustypipe::model::richtext::ToPlaintext;
+use rustypipe::model::{
+    AlbumItem, AlbumType, ArtistId, ArtistItem, AudioFormat, AudioStream, MusicPlaylistItem,
+    Thumbnail, TrackItem,
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+#[derive(Clone)]
+pub struct StreamInfo {
+    pub url: String,
+    pub mime: String,
+    pub size: Option<u64>,
+    pub expires: Instant,
+}
+
+pub struct Yt {
+    pub rp: RustyPipe,
+    http: reqwest::Client,
+    streams: Mutex<HashMap<String, StreamInfo>>,
+    pub ytdlp_dir: PathBuf,
+}
+
+// ------------------------------------------------------------------ conversions
+pub fn best_thumb(thumbs: &[Thumbnail]) -> Option<String> {
+    let t = thumbs.iter().max_by_key(|t| t.width * t.height)?;
+    Some(upscale(&t.url))
+}
+
+/// googleusercontent covers carry their size in the URL (`=w120-h120-...`); ask for a bigger one.
+fn upscale(url: &str) -> String {
+    if (url.contains("googleusercontent.com") || url.contains("ggpht.com"))
+        && let Some(i) = url.rfind("=w")
+    {
+        return format!("{}=w544-h544-l90-rj", &url[..i]);
+    }
+    url.to_string()
+}
+
+fn artists(a: &[ArtistId]) -> Vec<ArtistRef> {
+    a.iter()
+        .map(|a| ArtistRef { id: a.id.clone(), name: a.name.clone() })
+        .collect()
+}
+
+pub fn track(t: TrackItem) -> Track {
+    Track {
+        cover: best_thumb(&t.cover),
+        artists: artists(&t.artists),
+        album: t.album.map(|a| AlbumRef { id: a.id, name: a.name }),
+        duration: t.duration,
+        title: t.name,
+        id: t.id,
+    }
+}
+
+fn album_kind(k: AlbumType) -> &'static str {
+    match k {
+        AlbumType::Ep => "ep",
+        AlbumType::Single => "single",
+        AlbumType::Audiobook => "audiobook",
+        AlbumType::Show => "show",
+        _ => "album",
+    }
+}
+
+fn album(a: AlbumItem) -> AlbumCard {
+    AlbumCard {
+        cover: best_thumb(&a.cover),
+        artists: artists(&a.artists),
+        year: a.year,
+        kind: album_kind(a.album_type).to_string(),
+        title: a.name,
+        id: a.id,
+    }
+}
+
+fn artist(a: ArtistItem) -> ArtistCard {
+    ArtistCard {
+        cover: best_thumb(&a.avatar),
+        subscribers: a.subscriber_count,
+        name: a.name,
+        id: a.id,
+    }
+}
+
+pub fn playlist_card(p: MusicPlaylistItem) -> PlaylistCard {
+    PlaylistCard {
+        cover: best_thumb(&p.thumbnail),
+        author: p.channel.map(|c| c.name),
+        count: p.track_count,
+        title: p.name,
+        id: p.id,
+    }
+}
+
+fn pick_audio(streams: &[AudioStream], prefer_m4a: bool) -> Option<&AudioStream> {
+    let usable = || {
+        streams
+            .iter()
+            .filter(|s| s.drm_systems.is_empty())
+            // multi-language videos: skip dubbed tracks
+            .filter(|s| s.track.as_ref().is_none_or(|t| t.is_default))
+    };
+    if prefer_m4a
+        && let Some(s) = usable()
+            .filter(|s| s.format == AudioFormat::M4a)
+            .max_by_key(|s| s.bitrate)
+    {
+        return Some(s);
+    }
+    usable().max_by_key(|s| s.bitrate)
+}
+
+impl Yt {
+    pub fn new(storage: PathBuf, ytdlp_dir: PathBuf) -> Result<Self> {
+        let rp = RustyPipe::builder()
+            .storage_dir(storage)
+            .timeout(Duration::from_secs(20))
+            .build()?;
+        let http = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+        Ok(Self { rp, http, streams: Mutex::new(HashMap::new()), ytdlp_dir })
+    }
+
+    pub async fn search(&self, q: &str) -> Result<SearchResults> {
+        let qr = self.rp.query();
+        let (tracks, albums, artists, playlists) = tokio::join!(
+            qr.music_search_tracks(q),
+            qr.music_search_albums(q),
+            qr.music_search_artists(q),
+            qr.music_search_playlists(q, false),
+        );
+        // Tracks are the critical part; other categories degrade gracefully.
+        let tracks = tracks.context("track search failed")?;
+        Ok(SearchResults {
+            tracks: tracks.items.items.into_iter().map(track).collect(),
+            albums: albums
+                .map(|r| r.items.items.into_iter().map(album).take(12).collect())
+                .unwrap_or_default(),
+            artists: artists
+                .map(|r| r.items.items.into_iter().map(artist).take(12).collect())
+                .unwrap_or_default(),
+            playlists: playlists
+                .map(|r| r.items.items.into_iter().map(playlist_card).take(12).collect())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub async fn suggestions(&self, q: &str) -> Result<Vec<String>> {
+        Ok(self.rp.query().music_search_suggestion(q).await?.terms)
+    }
+
+    pub async fn home(&self) -> Result<Home> {
+        let qr = self.rp.query();
+        let (charts, new) = tokio::join!(qr.music_charts(None), qr.music_new_albums());
+        let mut sections = Vec::new();
+        if let Ok(n) = new
+            && !n.is_empty()
+        {
+            sections.push(HomeSection {
+                title: "new_releases".into(),
+                albums: n.into_iter().take(12).map(album).collect(),
+                ..Default::default()
+            });
+        }
+        if let Ok(c) = charts {
+            if !c.top_tracks.is_empty() {
+                sections.push(HomeSection {
+                    title: "top_tracks".into(),
+                    tracks: c.top_tracks.into_iter().map(track).collect(),
+                    ..Default::default()
+                });
+            }
+            if !c.trending_tracks.is_empty() {
+                sections.push(HomeSection {
+                    title: "trending".into(),
+                    tracks: c.trending_tracks.into_iter().map(track).collect(),
+                    ..Default::default()
+                });
+            }
+            if !c.artists.is_empty() {
+                sections.push(HomeSection {
+                    title: "popular_artists".into(),
+                    artists: c.artists.into_iter().take(12).map(artist).collect(),
+                    ..Default::default()
+                });
+            }
+            if !c.playlists.is_empty() {
+                sections.push(HomeSection {
+                    title: "charts".into(),
+                    playlists: c.playlists.into_iter().take(12).map(playlist_card).collect(),
+                    ..Default::default()
+                });
+            }
+        }
+        if sections.is_empty() {
+            return Err(anyhow!("can't reach YouTube Music"));
+        }
+        Ok(Home { sections })
+    }
+
+    pub async fn album(&self, id: &str) -> Result<AlbumPage> {
+        let a = self.rp.query().music_album(id).await?;
+        let cover = best_thumb(&a.cover);
+        let album_ref = AlbumRef { id: a.id.clone(), name: a.name.clone() };
+        let tracks = a
+            .tracks
+            .into_iter()
+            .map(|t| {
+                let mut t = track(t);
+                // album tracks come without their own cover/album; fill them in
+                if t.cover.is_none() {
+                    t.cover = cover.clone();
+                }
+                if t.album.is_none() {
+                    t.album = Some(album_ref.clone());
+                }
+                t
+            })
+            .collect();
+        Ok(AlbumPage {
+            title: a.name,
+            artists: artists(&a.artists),
+            year: a.year,
+            kind: album_kind(a.album_type).to_string(),
+            description: a.description.map(|d| d.to_plaintext()).filter(|s| !s.is_empty()),
+            tracks,
+            cover,
+            id: a.id,
+        })
+    }
+
+    pub async fn artist(&self, id: &str) -> Result<ArtistPage> {
+        let a = self.rp.query().music_artist(id, false).await?;
+        let (singles, albums): (Vec<_>, Vec<_>) = a
+            .albums
+            .into_iter()
+            .partition(|x| matches!(x.album_type, AlbumType::Single | AlbumType::Ep));
+        Ok(ArtistPage {
+            cover: best_thumb(&a.header_image),
+            subscribers: a.subscriber_count,
+            description: a.description,
+            tracks: a.tracks.into_iter().map(track).collect(),
+            albums: albums.into_iter().map(album).collect(),
+            singles: singles.into_iter().map(album).collect(),
+            playlists: a.playlists.into_iter().map(playlist_card).collect(),
+            similar: a.similar_artists.into_iter().map(artist).collect(),
+            name: a.name,
+            id: a.id,
+        })
+    }
+
+    pub async fn playlist(&self, id: &str, authenticated: bool) -> Result<PlaylistPage> {
+        let mut qr = self.rp.query();
+        if authenticated {
+            qr = qr.authenticated();
+        }
+        let mut p = qr.music_playlist(id).await?;
+        p.tracks.extend_limit(&qr, 1000).await.ok();
+        Ok(PlaylistPage {
+            cover: best_thumb(&p.thumbnail),
+            author: p.channel.map(|c| c.name),
+            description: p.description.map(|d| d.to_plaintext()).filter(|s| !s.is_empty()),
+            tracks: p.tracks.items.into_iter().map(track).collect(),
+            title: p.name,
+            id: p.id,
+        })
+    }
+
+    pub async fn radio(&self, id: &str) -> Result<Vec<Track>> {
+        let qr = self.rp.query();
+        let mut p = qr.music_radio_track(id).await?;
+        p.extend_limit(&qr, 50).await.ok();
+        Ok(p.items.into_iter().map(track).collect())
+    }
+
+    pub async fn lyrics(&self, id: &str) -> Result<Option<LyricsOut>> {
+        let qr = self.rp.query();
+        let d = qr.music_details(id).await?;
+        let Some(lid) = d.lyrics_id else { return Ok(None) };
+        match qr.music_lyrics(lid).await {
+            Ok(l) => Ok(Some(LyricsOut { body: l.body, footer: l.footer })),
+            Err(rustypipe::error::Error::Extraction(
+                rustypipe::error::ExtractionError::NotFound { .. },
+            )) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // ------------------------------------------------------------ account
+    pub async fn login(&self, text: &str) -> Result<()> {
+        let text = text.trim();
+        let text = text.strip_prefix("Cookie:").map(str::trim).unwrap_or(text);
+        if text.contains('\t') {
+            self.rp.user_auth_set_cookie_txt(text).await?;
+        } else {
+            self.rp.user_auth_set_cookie(text).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn logout(&self) -> Result<()> {
+        self.rp.user_auth_remove_cookie().await.ok();
+        Ok(())
+    }
+
+    pub async fn liked_tracks(&self) -> Result<Vec<Track>> {
+        let qr = self.rp.query().authenticated();
+        let mut p = qr.music_liked_tracks().await?;
+        p.tracks.extend_limit(&qr, 5000).await.ok();
+        Ok(p.tracks.items.into_iter().map(track).collect())
+    }
+
+    pub async fn saved_playlists(&self) -> Result<Vec<PlaylistCard>> {
+        let qr = self.rp.query().authenticated();
+        let mut p = qr.music_saved_playlists().await?;
+        p.extend_limit(&qr, 500).await.ok();
+        Ok(p.items
+            .into_iter()
+            // "LM" (liked music) is synced into local likes separately
+            .filter(|p| p.id != "LM")
+            .map(playlist_card)
+            .collect())
+    }
+
+    // ------------------------------------------------------------ streams
+    pub fn invalidate(&self, id: &str) {
+        self.streams.lock().unwrap().remove(id);
+    }
+
+    /// Resolve a playable audio URL (m4a preferred, so the same URL serves downloads),
+    /// cached until shortly before it expires.
+    ///
+    /// The visionOS innertube call and rustypipe race; the first *verified* URL wins.
+    pub async fn stream(&self, id: &str) -> Result<StreamInfo> {
+        if let Some(s) = self.streams.lock().unwrap().get(id)
+            && s.expires > Instant::now()
+        {
+            return Ok(s.clone());
+        }
+        type Fut<'a> = Pin<Box<dyn Future<Output = Result<StreamInfo>> + Send + 'a>>;
+        // Pure-Rust resolvers first (~0.1 s); yt-dlp (~3 s, desktop only) is the safety net
+        // for when YouTube breaks them and yt-dlp has already caught up.
+        let native: Vec<Fut> = vec![Box::pin(self.stream_native(id)), Box::pin(self.stream_rustypipe(id))];
+        let resolved = match futures_util::future::select_ok(native).await {
+            Ok((s, _rest)) => s,
+            Err(e) if cfg!(desktop) => {
+                eprintln!("native stream resolvers failed for {id}: {e:#}; trying yt-dlp");
+                self.stream_ytdlp(id).await.context("couldn't get an audio stream")?
+            }
+            Err(e) => return Err(e.context("couldn't get an audio stream")),
+        };
+        self.streams.lock().unwrap().insert(id.to_string(), resolved.clone());
+        Ok(resolved)
+    }
+
+    async fn stream_rustypipe(&self, id: &str) -> Result<StreamInfo> {
+        let p = self.rp.query().player(id).await?;
+        let s = pick_audio(&p.audio_streams, true).ok_or_else(|| anyhow!("no audio stream"))?;
+        // Without a PO token YouTube serves only the first ~1 MB and then 403s,
+        // which would cut playback mid-track. Probe the tail before trusting the URL.
+        if s.size > 1_200_000 {
+            let tail = format!("bytes={}-{}", s.size - 4096, s.size - 1);
+            let st = self.http.get(&s.url).header(reqwest::header::RANGE, tail).send().await?.status();
+            if st != reqwest::StatusCode::PARTIAL_CONTENT {
+                bail!("rustypipe: truncated stream ({st})");
+            }
+        }
+        let ttl = (p.expires_in_seconds as u64).saturating_sub(600).max(300);
+        Ok(StreamInfo {
+            url: s.url.clone(),
+            mime: s.mime.split(';').next().unwrap_or("audio/mp4").to_string(),
+            size: Some(s.size).filter(|&n| n > 0),
+            expires: Instant::now() + Duration::from_secs(ttl),
+        })
+    }
+
+    /// Direct innertube `player` call with the visionOS client — the same trick yt-dlp uses.
+    /// This client needs no JS player (no signature/n deobfuscation) and no PO token,
+    /// so it works in pure Rust everywhere, including Android.
+    async fn stream_native(&self, id: &str) -> Result<StreamInfo> {
+        const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+        let visitor = self.rp.query().get_visitor_data(false).await?;
+        let body = serde_json::json!({
+            "context": { "client": {
+                "clientName": "VISIONOS",
+                "clientVersion": "1.02",
+                "deviceMake": "Apple",
+                "deviceModel": "RealityDevice17,1",
+                "osName": "visionOS",
+                "osVersion": "26.5.23O471",
+                "hl": "en",
+                "gl": "US",
+                "visitorData": visitor,
+            }},
+            "videoId": id,
+            "contentCheckOk": true,
+            "racyCheckOk": true,
+        });
+        let resp: serde_json::Value = self
+            .http
+            .post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .header("X-YouTube-Client-Name", "101")
+            .header("X-YouTube-Client-Version", "1.02")
+            .header("X-Goog-Visitor-Id", &visitor)
+            .header("Origin", "https://www.youtube.com")
+            .header(reqwest::header::USER_AGENT, UA)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let status = resp["playabilityStatus"]["status"].as_str().unwrap_or("");
+        if status != "OK" {
+            let reason = resp["playabilityStatus"]["reason"].as_str().unwrap_or("unknown");
+            if status == "LOGIN_REQUIRED" {
+                // a stale visitor id can trigger the bot check; get a fresh one next time
+                self.rp.query().remove_visitor_data(&visitor);
+            }
+            bail!("visionOS: {status}: {reason}");
+        }
+        let formats = resp["streamingData"]["adaptiveFormats"].as_array().ok_or_else(|| anyhow!("no formats"))?;
+        let audio = formats.iter().filter(|f| {
+            f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/"))
+                && f["url"].is_string()
+                && f["drmFamilies"].is_null()
+                // skip dubbed tracks on multi-language videos
+                && f["audioTrack"]["audioIsDefault"].as_bool().unwrap_or(true)
+        });
+        let bitrate = |f: &&serde_json::Value| f["bitrate"].as_u64().unwrap_or(0);
+        let best = audio
+            .clone()
+            .filter(|f| f["mimeType"].as_str().is_some_and(|m| m.starts_with("audio/mp4")))
+            .max_by_key(bitrate)
+            .or_else(|| audio.max_by_key(bitrate))
+            .ok_or_else(|| anyhow!("visionOS: no audio stream"))?;
+        let ttl = resp["streamingData"]["expiresInSeconds"]
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(21540)
+            .saturating_sub(600)
+            .max(300);
+        Ok(StreamInfo {
+            url: best["url"].as_str().unwrap_or_default().to_string(),
+            mime: best["mimeType"].as_str().unwrap_or("audio/mp4").split(';').next().unwrap_or("audio/mp4").to_string(),
+            size: best["contentLength"].as_str().and_then(|s| s.parse().ok()),
+            expires: Instant::now() + Duration::from_secs(ttl),
+        })
+    }
+
+    async fn stream_ytdlp(&self, id: &str) -> Result<StreamInfo> {
+        let url = ytdlp::get_url(&self.ytdlp_dir, id).await?;
+        let mime = if url.contains("mime=audio%2Fwebm") { "audio/webm" } else { "audio/mp4" };
+        Ok(StreamInfo {
+            url,
+            mime: mime.into(),
+            size: None,
+            expires: Instant::now() + Duration::from_secs(3 * 3600),
+        })
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    /// Hits real YouTube. Run with: cargo test live -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_smoke() {
+        let dir = std::env::temp_dir().join("ytubem-test");
+        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let r = yt.search("Океан Ельзи").await.unwrap();
+        println!("tracks={} albums={} artists={} playlists={}", r.tracks.len(), r.albums.len(), r.artists.len(), r.playlists.len());
+        let t = &r.tracks[0];
+        println!("first: {} - {} ({:?})", t.artist_line(), t.title, t.duration);
+        println!("suggest: {:?}", yt.suggestions("океан").await.unwrap());
+        let a = yt.album(&r.albums[0].id).await.unwrap();
+        println!("album: {} tracks={}", a.title, a.tracks.len());
+        let ar = yt.artist(&r.artists[0].id).await.unwrap();
+        println!("artist: {} top={} albums={} singles={}", ar.name, ar.tracks.len(), ar.albums.len(), ar.singles.len());
+        println!("radio: {}", yt.radio(&t.id).await.unwrap().len());
+        println!("lyrics: {}", yt.lyrics(&t.id).await.unwrap().is_some());
+        let home = yt.home().await.unwrap();
+        println!("home: {:?}", home.sections.iter().map(|s| &s.title).collect::<Vec<_>>());
+        let pl = yt.playlist(&r.playlists[0].id, false).await.unwrap();
+        println!("playlist: {} tracks={}", pl.title, pl.tracks.len());
+
+        let start = Instant::now();
+        let s = yt.stream(&t.id).await.unwrap();
+        println!("stream mime={} size={:?} in {:?}", s.mime, s.size, start.elapsed());
+        let start = Instant::now();
+        yt.stream(&t.id).await.unwrap();
+        println!("cached in {:?}", start.elapsed());
+    }
+}
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore]
+    async fn live_native_stream() {
+        let dir = std::env::temp_dir().join("ytubem-test");
+        let yt = Yt::new(dir.join("rp"), dir.join("bin")).unwrap();
+        let c = reqwest::Client::new();
+        for id in ["8wWrzr3_46Y", "1BdGqKO3ERY", "dQw4w9WgXcQ"] {
+            let t = Instant::now();
+            match yt.stream_native(id).await {
+                Ok(s) => {
+                    let el = t.elapsed();
+                    let size = s.size.unwrap_or(0);
+                    let open = c.get(&s.url).header("Range", "bytes=0-").send().await.unwrap().status();
+                    let tail = c.get(&s.url).header("Range", format!("bytes={}-{}", size - 4096, size - 1)).send().await.unwrap().status();
+                    println!("{id}: {} size={size} in {el:?} open={open} tail={tail}", s.mime);
+                }
+                Err(e) => println!("{id}: ERROR {e:#}"),
+            }
+        }
+    }
+}

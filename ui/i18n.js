@@ -1,0 +1,253 @@
+// UI translations. English is the default; add a language by adding a dictionary.
+export const LANGS = { en: 'English', uk: 'Українська', ru: 'Русский' };
+
+const D = {
+  en: {
+    'nav.home': 'Home', 'nav.search': 'Search', 'nav.library': 'Your Library', 'nav.settings': 'Settings',
+    'nav.newPlaylist': 'New playlist', 'nav.back': 'Back', 'nav.forward': 'Forward',
+    'lib.liked': 'Liked Songs', 'lib.downloads': 'Downloads', 'lib.history': 'History',
+    'lib.historySub': 'Recently played', 'lib.playlist': 'Playlist', 'lib.offline': 'Offline',
+    'top.searchPh': 'What do you want to listen to?', 'top.login': 'Log in', 'top.account': 'Account',
+    'rp.queue': 'Queue', 'rp.lyrics': 'Lyrics', 'rp.close': 'Close',
+    'rp.nowPlaying': 'Now playing', 'rp.next': 'Next up', 'rp.nextFrom': 'Next from: {title}',
+    'rp.emptyQueue': 'Your queue is empty.', 'rp.nothing': 'Nothing is playing.',
+    'rp.noLyrics': 'No lyrics for this track.', 'rp.lyricsFail': "Couldn't load lyrics: {e}",
+    'pl.like': 'Save to Liked Songs', 'pl.shuffle': 'Shuffle', 'pl.prev': 'Previous', 'pl.play': 'Play',
+    'pl.next': 'Next', 'pl.repeat': 'Repeat', 'pl.volume': 'Mute', 'pl.queue': 'Queue', 'pl.lyrics': 'Lyrics',
+    tracks: ['{n} song', '{n} songs'],
+    'time.hm': '{h} hr {m} min', 'time.m': '{m} min',
+    subscribers: '{n} subscribers',
+    'kind.album': 'Album', 'kind.ep': 'EP', 'kind.single': 'Single', 'kind.audiobook': 'Audiobook', 'kind.show': 'Show',
+    'kind.playlist': 'Playlist', 'kind.artist': 'Artist', 'kind.offline': 'Offline',
+    'sec.new_releases': 'New releases', 'sec.top_tracks': 'Top songs', 'sec.trending': 'Trending',
+    'sec.popular_artists': 'Popular artists', 'sec.charts': 'Charts',
+    'greet.night': 'Good night', 'greet.morning': 'Good morning', 'greet.day': 'Good afternoon', 'greet.evening': 'Good evening',
+    'home.recent': 'Recently played', 'home.recoFail': "Couldn't load recommendations: {e}",
+    'err.title': 'Something went wrong', 'err.reload': 'Reload',
+    'col.title': 'Title', 'col.album': 'Album', 'tr.downloaded': 'Downloaded', 'tr.downloading': 'Downloading',
+    'tr.like': 'Like', 'tr.more': 'More',
+    'search.title': 'Search', 'search.recent': 'Recent searches', 'search.hint': 'Search for songs, albums, artists and playlists.',
+    'search.results': 'Results for “{q}”', 'search.none': 'Nothing found.', 'search.songs': 'Songs',
+    'search.artists': 'Artists', 'search.albums': 'Albums', 'search.playlists': 'Playlists',
+    'act.play': 'Play', 'act.shuffle': 'Shuffle', 'act.downloadAll': 'Download all', 'act.saveAsPlaylist': 'Save as playlist',
+    'act.saveToLibrary': 'Save to library', 'act.rename': 'Rename', 'act.deletePlaylist': 'Delete playlist',
+    'act.artistRadio': 'Artist radio',
+    'artist.popular': 'Popular', 'artist.albums': 'Albums', 'artist.singles': 'Singles & EPs',
+    'artist.playlists': 'Playlists', 'artist.similar': 'Fans also like', 'artist.about': 'About',
+    'local.empty': 'This playlist is empty. Add songs from the “⋯” menu.',
+    'liked.empty': 'Tap ♡ next to a song to save it here.',
+    'dl.active': 'Downloading: {n}', 'dl.empty': 'Downloaded songs show up here and play without internet.',
+    'history.empty': 'Nothing here yet.',
+    'set.title': 'Settings', 'set.language': 'Language',
+    'set.account': 'YouTube Music account', 'set.loggedIn': 'Logged in', 'set.sync': 'Sync likes & playlists', 'set.logout': 'Log out',
+    'set.loginHint': 'To import your likes and playlists, the app needs cookies from a browser where you are signed in to music.youtube.com.',
+    'set.step1': 'Install an extension like “Get cookies.txt LOCALLY” (Chrome/Edge/Firefox).',
+    'set.step2': 'Open music.youtube.com and export cookies in Netscape format (cookies.txt).',
+    'set.step3': 'Pick the file below or paste its contents.',
+    'set.pickFile': 'Choose cookies.txt', 'set.cookiePh': 'Paste cookies.txt contents or a “Cookie: …” header here', 'set.login': 'Log in',
+    'set.downloads': 'Downloads', 'set.dlHint': 'Songs are saved as .m4a (AAC) with tags and cover art.',
+    'set.save': 'Save', 'set.openFolder': 'Open folder',
+    'set.playback': 'Playback', 'set.autoplay': 'Autoplay similar songs when the queue ends',
+    'set.ytdlp': 'yt-dlp (fallback)', 'set.ytdlpHint': 'If YouTube changes something and the built-in client stops delivering audio, the app falls back to yt-dlp.',
+    'set.ytdlpFound': 'Found:', 'set.ytdlpMissing': 'Not installed.', 'set.ytdlpUpdate': 'Update yt-dlp', 'set.ytdlpInstall': 'Download yt-dlp',
+    'set.downloading': 'Downloading…',
+    'menu.playNext': 'Play next', 'menu.addQueue': 'Add to queue', 'menu.radio': 'Go to song radio',
+    'menu.addPlaylist': 'Add to playlist', 'menu.newPlaylist': '+ New playlist',
+    'menu.like': 'Save to Liked Songs', 'menu.unlike': 'Remove from Liked Songs',
+    'menu.download': 'Download', 'menu.removeDownload': 'Remove download',
+    'menu.artist': 'Go to artist', 'menu.album': 'Go to album', 'menu.copy': 'Copy link',
+    'menu.removeFromPlaylist': 'Remove from this playlist',
+    'toast.playNext': 'Playing next', 'toast.queued': 'Added to queue', 'toast.copied': 'Link copied',
+    'toast.liked': 'Added to Liked Songs', 'toast.unliked': 'Removed from Liked Songs',
+    'toast.alreadyDl': 'Already downloaded', 'toast.dlStarted': 'Downloading {tracks}', 'toast.dlRemoved': 'Download removed',
+    'toast.dlError': 'Download failed: {e}', 'toast.radio': 'Building radio…',
+    'toast.created': 'Created “{name}”', 'toast.createdAdded': 'Created “{name}” and added songs',
+    'toast.addedTo': 'Added to “{name}”', 'toast.saved': 'Saved “{name}”', 'toast.settingsSaved': 'Saved',
+    'toast.pasteCookies': 'Paste your cookies first', 'toast.loggedIn': 'Logged in. Syncing…',
+    'toast.synced': 'Synced {tracks} and {n} playlists', 'toast.syncFail': 'Sync failed: {e}',
+    'toast.ytdlpOk': 'yt-dlp installed', 'toast.playFail': "Couldn't play “{title}”",
+    'dlg.newPlaylist': 'New playlist', 'dlg.defaultName': 'My playlist #{n}', 'dlg.rename': 'Rename playlist',
+    'dlg.delete': 'Delete playlist “{name}”?', 'dlg.cancel': 'Cancel', 'dlg.save': 'Save',
+    'radio.title': 'Radio: {title}',
+  },
+
+  uk: {
+    'nav.home': 'Головна', 'nav.search': 'Пошук', 'nav.library': 'Бібліотека', 'nav.settings': 'Налаштування',
+    'nav.newPlaylist': 'Новий плейлист', 'nav.back': 'Назад', 'nav.forward': 'Вперед',
+    'lib.liked': 'Улюблені треки', 'lib.downloads': 'Завантажене', 'lib.history': 'Історія',
+    'lib.historySub': 'Нещодавно прослухане', 'lib.playlist': 'Плейлист', 'lib.offline': 'Офлайн',
+    'top.searchPh': 'Що хочеш послухати?', 'top.login': 'Увійти', 'top.account': 'Акаунт',
+    'rp.queue': 'Черга', 'rp.lyrics': 'Текст', 'rp.close': 'Закрити',
+    'rp.nowPlaying': 'Зараз грає', 'rp.next': 'Далі', 'rp.nextFrom': 'Далі: {title}',
+    'rp.emptyQueue': 'Черга порожня.', 'rp.nothing': 'Нічого не грає.',
+    'rp.noLyrics': 'Для цього треку немає тексту.', 'rp.lyricsFail': 'Не вдалося завантажити текст: {e}',
+    'pl.like': 'Додати в улюблені', 'pl.shuffle': 'Перемішати', 'pl.prev': 'Попередній', 'pl.play': 'Грати',
+    'pl.next': 'Наступний', 'pl.repeat': 'Повтор', 'pl.volume': 'Звук', 'pl.queue': 'Черга', 'pl.lyrics': 'Текст',
+    tracks: ['{n} трек', '{n} треки', '{n} треків'],
+    'time.hm': '{h} год {m} хв', 'time.m': '{m} хв',
+    subscribers: '{n} підписників',
+    'kind.album': 'Альбом', 'kind.ep': 'EP', 'kind.single': 'Сингл', 'kind.audiobook': 'Аудіокнига', 'kind.show': 'Шоу',
+    'kind.playlist': 'Плейлист', 'kind.artist': 'Виконавець', 'kind.offline': 'Офлайн',
+    'sec.new_releases': 'Нові релізи', 'sec.top_tracks': 'Топ треків', 'sec.trending': 'У тренді',
+    'sec.popular_artists': 'Популярні виконавці', 'sec.charts': 'Чарти',
+    'greet.night': 'Доброї ночі', 'greet.morning': 'Доброго ранку', 'greet.day': 'Доброго дня', 'greet.evening': 'Доброго вечора',
+    'home.recent': 'Нещодавно прослухане', 'home.recoFail': 'Не вдалося завантажити рекомендації: {e}',
+    'err.title': 'Щось пішло не так', 'err.reload': 'Перезавантажити',
+    'col.title': 'Назва', 'col.album': 'Альбом', 'tr.downloaded': 'Завантажено', 'tr.downloading': 'Завантаження',
+    'tr.like': 'Улюблене', 'tr.more': 'Ще',
+    'search.title': 'Пошук', 'search.recent': 'Нещодавні запити', 'search.hint': 'Шукай треки, альбоми, виконавців і плейлисти.',
+    'search.results': 'Результати для «{q}»', 'search.none': 'Нічого не знайдено.', 'search.songs': 'Треки',
+    'search.artists': 'Виконавці', 'search.albums': 'Альбоми', 'search.playlists': 'Плейлисти',
+    'act.play': 'Грати', 'act.shuffle': 'Перемішати', 'act.downloadAll': 'Завантажити все', 'act.saveAsPlaylist': 'Зберегти як плейлист',
+    'act.saveToLibrary': 'Зберегти в бібліотеку', 'act.rename': 'Перейменувати', 'act.deletePlaylist': 'Видалити плейлист',
+    'act.artistRadio': 'Радіо виконавця',
+    'artist.popular': 'Популярне', 'artist.albums': 'Альбоми', 'artist.singles': 'Сингли та EP',
+    'artist.playlists': 'Плейлисти', 'artist.similar': 'Схожі виконавці', 'artist.about': 'Про виконавця',
+    'local.empty': 'Плейлист порожній. Додай треки через меню «⋯».',
+    'liked.empty': 'Тисни ♡ біля треку, щоб додати його сюди.',
+    'dl.active': 'Завантажується: {n}', 'dl.empty': "Тут з'являться завантажені треки. Їх можна слухати без інтернету.",
+    'history.empty': 'Поки порожньо.',
+    'set.title': 'Налаштування', 'set.language': 'Мова',
+    'set.account': 'Акаунт YouTube Music', 'set.loggedIn': 'Вхід виконано', 'set.sync': 'Синхронізувати лайки й плейлисти', 'set.logout': 'Вийти',
+    'set.loginHint': 'Щоб підтягнути твої лайки й плейлисти, потрібні cookies з браузера, де ти залогінений у music.youtube.com.',
+    'set.step1': 'Встанови розширення на кшталт «Get cookies.txt LOCALLY» (Chrome/Edge/Firefox).',
+    'set.step2': 'Відкрий music.youtube.com, експортуй cookies у форматі Netscape (cookies.txt).',
+    'set.step3': 'Вибери файл нижче або встав його вміст.',
+    'set.pickFile': 'Вибрати cookies.txt', 'set.cookiePh': 'Встав сюди вміст cookies.txt або рядок Cookie: ...', 'set.login': 'Увійти',
+    'set.downloads': 'Завантаження', 'set.dlHint': 'Треки зберігаються у .m4a (AAC) з тегами й обкладинкою.',
+    'set.save': 'Зберегти', 'set.openFolder': 'Відкрити папку',
+    'set.playback': 'Відтворення', 'set.autoplay': 'Автоплей схожих треків, коли черга закінчилась',
+    'set.ytdlp': 'yt-dlp (запасний варіант)', 'set.ytdlpHint': 'Якщо YouTube щось змінить і вбудований клієнт перестане віддавати аудіо, застосунок спробує yt-dlp.',
+    'set.ytdlpFound': 'Знайдено:', 'set.ytdlpMissing': 'Не встановлено.', 'set.ytdlpUpdate': 'Оновити yt-dlp', 'set.ytdlpInstall': 'Завантажити yt-dlp',
+    'set.downloading': 'Завантажую…',
+    'menu.playNext': 'Грати далі', 'menu.addQueue': 'Додати в чергу', 'menu.radio': 'Радіо на основі треку',
+    'menu.addPlaylist': 'Додати в плейлист', 'menu.newPlaylist': '+ Новий плейлист',
+    'menu.like': 'Додати в улюблені', 'menu.unlike': 'Прибрати з улюблених',
+    'menu.download': 'Завантажити', 'menu.removeDownload': 'Видалити завантаження',
+    'menu.artist': 'До виконавця', 'menu.album': 'До альбому', 'menu.copy': 'Копіювати посилання',
+    'menu.removeFromPlaylist': 'Прибрати з цього плейлиста',
+    'toast.playNext': 'Буде наступним', 'toast.queued': 'Додано в чергу', 'toast.copied': 'Скопійовано',
+    'toast.liked': 'Додано в улюблені', 'toast.unliked': 'Прибрано з улюблених',
+    'toast.alreadyDl': 'Уже завантажено', 'toast.dlStarted': 'Завантаження: {tracks}', 'toast.dlRemoved': 'Завантаження видалено',
+    'toast.dlError': 'Помилка завантаження: {e}', 'toast.radio': 'Збираю радіо…',
+    'toast.created': 'Створено «{name}»', 'toast.createdAdded': 'Створено «{name}» і додано треки',
+    'toast.addedTo': 'Додано в «{name}»', 'toast.saved': 'Збережено «{name}»', 'toast.settingsSaved': 'Збережено',
+    'toast.pasteCookies': 'Встав cookies', 'toast.loggedIn': 'Вхід виконано. Синхронізую…',
+    'toast.synced': 'Синхронізовано: {tracks} і {n} плейлистів', 'toast.syncFail': 'Синхронізація: {e}',
+    'toast.ytdlpOk': 'yt-dlp встановлено', 'toast.playFail': 'Не вдалося відтворити «{title}»',
+    'dlg.newPlaylist': 'Новий плейлист', 'dlg.defaultName': 'Мій плейлист #{n}', 'dlg.rename': 'Перейменувати плейлист',
+    'dlg.delete': 'Видалити плейлист «{name}»?', 'dlg.cancel': 'Скасувати', 'dlg.save': 'Зберегти',
+    'radio.title': 'Радіо: {title}',
+  },
+
+  ru: {
+    'nav.home': 'Главная', 'nav.search': 'Поиск', 'nav.library': 'Библиотека', 'nav.settings': 'Настройки',
+    'nav.newPlaylist': 'Новый плейлист', 'nav.back': 'Назад', 'nav.forward': 'Вперёд',
+    'lib.liked': 'Любимые треки', 'lib.downloads': 'Загрузки', 'lib.history': 'История',
+    'lib.historySub': 'Недавно прослушанное', 'lib.playlist': 'Плейлист', 'lib.offline': 'Офлайн',
+    'top.searchPh': 'Что хочешь послушать?', 'top.login': 'Войти', 'top.account': 'Аккаунт',
+    'rp.queue': 'Очередь', 'rp.lyrics': 'Текст', 'rp.close': 'Закрыть',
+    'rp.nowPlaying': 'Сейчас играет', 'rp.next': 'Далее', 'rp.nextFrom': 'Далее: {title}',
+    'rp.emptyQueue': 'Очередь пуста.', 'rp.nothing': 'Ничего не играет.',
+    'rp.noLyrics': 'Для этого трека нет текста.', 'rp.lyricsFail': 'Не удалось загрузить текст: {e}',
+    'pl.like': 'Добавить в любимые', 'pl.shuffle': 'Перемешать', 'pl.prev': 'Предыдущий', 'pl.play': 'Играть',
+    'pl.next': 'Следующий', 'pl.repeat': 'Повтор', 'pl.volume': 'Звук', 'pl.queue': 'Очередь', 'pl.lyrics': 'Текст',
+    tracks: ['{n} трек', '{n} трека', '{n} треков'],
+    'time.hm': '{h} ч {m} мин', 'time.m': '{m} мин',
+    subscribers: '{n} подписчиков',
+    'kind.album': 'Альбом', 'kind.ep': 'EP', 'kind.single': 'Сингл', 'kind.audiobook': 'Аудиокнига', 'kind.show': 'Шоу',
+    'kind.playlist': 'Плейлист', 'kind.artist': 'Исполнитель', 'kind.offline': 'Офлайн',
+    'sec.new_releases': 'Новые релизы', 'sec.top_tracks': 'Топ треков', 'sec.trending': 'В тренде',
+    'sec.popular_artists': 'Популярные исполнители', 'sec.charts': 'Чарты',
+    'greet.night': 'Доброй ночи', 'greet.morning': 'Доброе утро', 'greet.day': 'Добрый день', 'greet.evening': 'Добрый вечер',
+    'home.recent': 'Недавно прослушанное', 'home.recoFail': 'Не удалось загрузить рекомендации: {e}',
+    'err.title': 'Что-то пошло не так', 'err.reload': 'Перезагрузить',
+    'col.title': 'Название', 'col.album': 'Альбом', 'tr.downloaded': 'Загружено', 'tr.downloading': 'Загрузка',
+    'tr.like': 'Любимое', 'tr.more': 'Ещё',
+    'search.title': 'Поиск', 'search.recent': 'Недавние запросы', 'search.hint': 'Ищи треки, альбомы, исполнителей и плейлисты.',
+    'search.results': 'Результаты для «{q}»', 'search.none': 'Ничего не найдено.', 'search.songs': 'Треки',
+    'search.artists': 'Исполнители', 'search.albums': 'Альбомы', 'search.playlists': 'Плейлисты',
+    'act.play': 'Играть', 'act.shuffle': 'Перемешать', 'act.downloadAll': 'Скачать всё', 'act.saveAsPlaylist': 'Сохранить как плейлист',
+    'act.saveToLibrary': 'Сохранить в библиотеку', 'act.rename': 'Переименовать', 'act.deletePlaylist': 'Удалить плейлист',
+    'act.artistRadio': 'Радио исполнителя',
+    'artist.popular': 'Популярное', 'artist.albums': 'Альбомы', 'artist.singles': 'Синглы и EP',
+    'artist.playlists': 'Плейлисты', 'artist.similar': 'Похожие исполнители', 'artist.about': 'Об исполнителе',
+    'local.empty': 'Плейлист пуст. Добавь треки через меню «⋯».',
+    'liked.empty': 'Нажми ♡ рядом с треком, чтобы добавить его сюда.',
+    'dl.active': 'Загружается: {n}', 'dl.empty': 'Здесь появятся скачанные треки. Их можно слушать без интернета.',
+    'history.empty': 'Пока пусто.',
+    'set.title': 'Настройки', 'set.language': 'Язык',
+    'set.account': 'Аккаунт YouTube Music', 'set.loggedIn': 'Вход выполнен', 'set.sync': 'Синхронизировать лайки и плейлисты', 'set.logout': 'Выйти',
+    'set.loginHint': 'Чтобы подтянуть твои лайки и плейлисты, нужны cookies из браузера, где ты залогинен в music.youtube.com.',
+    'set.step1': 'Установи расширение вроде «Get cookies.txt LOCALLY» (Chrome/Edge/Firefox).',
+    'set.step2': 'Открой music.youtube.com, экспортируй cookies в формате Netscape (cookies.txt).',
+    'set.step3': 'Выбери файл ниже или вставь его содержимое.',
+    'set.pickFile': 'Выбрать cookies.txt', 'set.cookiePh': 'Вставь сюда содержимое cookies.txt или строку Cookie: ...', 'set.login': 'Войти',
+    'set.downloads': 'Загрузки', 'set.dlHint': 'Треки сохраняются в .m4a (AAC) с тегами и обложкой.',
+    'set.save': 'Сохранить', 'set.openFolder': 'Открыть папку',
+    'set.playback': 'Воспроизведение', 'set.autoplay': 'Автоплей похожих треков, когда очередь закончилась',
+    'set.ytdlp': 'yt-dlp (запасной вариант)', 'set.ytdlpHint': 'Если YouTube что-то изменит и встроенный клиент перестанет отдавать аудио, приложение попробует yt-dlp.',
+    'set.ytdlpFound': 'Найдено:', 'set.ytdlpMissing': 'Не установлено.', 'set.ytdlpUpdate': 'Обновить yt-dlp', 'set.ytdlpInstall': 'Скачать yt-dlp',
+    'set.downloading': 'Скачиваю…',
+    'menu.playNext': 'Играть следующим', 'menu.addQueue': 'Добавить в очередь', 'menu.radio': 'Радио на основе трека',
+    'menu.addPlaylist': 'Добавить в плейлист', 'menu.newPlaylist': '+ Новый плейлист',
+    'menu.like': 'Добавить в любимые', 'menu.unlike': 'Убрать из любимых',
+    'menu.download': 'Скачать', 'menu.removeDownload': 'Удалить загрузку',
+    'menu.artist': 'К исполнителю', 'menu.album': 'К альбому', 'menu.copy': 'Копировать ссылку',
+    'menu.removeFromPlaylist': 'Убрать из этого плейлиста',
+    'toast.playNext': 'Будет следующим', 'toast.queued': 'Добавлено в очередь', 'toast.copied': 'Скопировано',
+    'toast.liked': 'Добавлено в любимые', 'toast.unliked': 'Убрано из любимых',
+    'toast.alreadyDl': 'Уже скачано', 'toast.dlStarted': 'Загрузка: {tracks}', 'toast.dlRemoved': 'Загрузка удалена',
+    'toast.dlError': 'Ошибка загрузки: {e}', 'toast.radio': 'Собираю радио…',
+    'toast.created': 'Создан «{name}»', 'toast.createdAdded': 'Создан «{name}», треки добавлены',
+    'toast.addedTo': 'Добавлено в «{name}»', 'toast.saved': 'Сохранено «{name}»', 'toast.settingsSaved': 'Сохранено',
+    'toast.pasteCookies': 'Вставь cookies', 'toast.loggedIn': 'Вход выполнен. Синхронизирую…',
+    'toast.synced': 'Синхронизировано: {tracks} и {n} плейлистов', 'toast.syncFail': 'Синхронизация: {e}',
+    'toast.ytdlpOk': 'yt-dlp установлен', 'toast.playFail': 'Не удалось воспроизвести «{title}»',
+    'dlg.newPlaylist': 'Новый плейлист', 'dlg.defaultName': 'Мой плейлист #{n}', 'dlg.rename': 'Переименовать плейлист',
+    'dlg.delete': 'Удалить плейлист «{name}»?', 'dlg.cancel': 'Отмена', 'dlg.save': 'Сохранить',
+    'radio.title': 'Радио: {title}',
+  },
+};
+
+function detect() {
+  try {
+    const saved = localStorage.getItem('lang');
+    if (saved && D[saved]) return saved;
+  } catch { /* storage unavailable */ }
+  return 'en';
+}
+
+export let lang = detect();
+export const locale = () => ({ en: 'en-US', uk: 'uk-UA', ru: 'ru-RU' }[lang]);
+
+export function setLang(l) {
+  if (!D[l]) return;
+  try { localStorage.setItem('lang', l); } catch { /* ignore */ }
+  location.reload();
+}
+
+const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
+
+/** Plural category index: en [one, other]; uk/ru [one, few, many]. */
+function pluralIdx(n) {
+  if (lang === 'en') return n === 1 ? 0 : 1;
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 0;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 1;
+  return 2;
+}
+
+export function t(key, vars = {}) {
+  let s = D[lang][key] ?? D.en[key] ?? key;
+  if (Array.isArray(s)) s = s[Math.min(pluralIdx(vars.n ?? 0), s.length - 1)];
+  return fill(s, vars);
+}
+
+/** Translate static markup: data-i18n (text), data-i18n-title, data-i18n-ph (placeholder). */
+export function translateDom(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  root.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  root.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.documentElement.lang = lang;
+}

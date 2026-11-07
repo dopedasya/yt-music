@@ -25,15 +25,16 @@ pub fn notify_track(app: &AppHandle, core: &Core, t: &Track) {
 }
 
 // ------------------------------------------------------------------ Discord
-/// Discord application id of "YT Music" (Discord Developer Portal). Empty = disabled.
+/// Discord application id of "YT Music" (public; from the Discord Developer Portal).
+/// Forks can override it at build time with YTUBEM_DISCORD_CLIENT_ID.
 #[cfg(desktop)]
-pub const DISCORD_CLIENT_ID: &str = env_or_empty(option_env!("YTUBEM_DISCORD_CLIENT_ID"));
+pub const DISCORD_CLIENT_ID: &str = env_or(option_env!("YTUBEM_DISCORD_CLIENT_ID"), "1568772055766405213");
 
 #[cfg(desktop)]
-const fn env_or_empty(v: Option<&'static str>) -> &'static str {
+const fn env_or(v: Option<&'static str>, default: &'static str) -> &'static str {
     match v {
         Some(s) => s,
-        None => "",
+        None => default,
     }
 }
 
@@ -170,6 +171,25 @@ pub fn register_hotkeys(app: &AppHandle) {
         // Another app may already own a combination; that one just won't work.
         if let Err(e) = app.global_shortcut().register(Shortcut::new(mods, code)) {
             eprintln!("hotkey {code:?} unavailable: {e}");
+        }
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod live_tests {
+    /// Connects to the local Discord app and clears the activity (nothing visible to friends).
+    #[test]
+    #[ignore]
+    fn live_discord_handshake() {
+        use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
+        let mut c = DiscordIpcClient::new(super::DISCORD_CLIENT_ID).expect("client");
+        match c.connect() {
+            Ok(()) => {
+                c.clear_activity().expect("clear");
+                c.close().ok();
+                println!("discord: connected and cleared with app id {}", super::DISCORD_CLIENT_ID);
+            }
+            Err(e) => println!("discord not reachable (is the Discord app running?): {e}"),
         }
     }
 }

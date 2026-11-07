@@ -4,6 +4,7 @@ mod color;
 mod commands;
 mod db;
 mod downloads;
+mod integrations;
 mod lyrics;
 mod models;
 mod playback;
@@ -25,9 +26,13 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(integrations::hotkeys_plugin());
     builder
         .setup(|app| {
             // YTUBEM_DATA_DIR isolates automated test runs from the user's real library.
@@ -63,6 +68,8 @@ pub fn run() {
                 });
             }
             app.manage(core);
+            #[cfg(desktop)]
+            integrations::register_hotkeys(app.handle());
 
             // The window starts hidden (no white flash); show it once set up.
             // YTUBEM_HIDDEN keeps it hidden for automated UI tests.
@@ -120,6 +127,10 @@ pub fn run() {
             playback::player_toggle_shuffle,
             playback::player_cycle_repeat,
             playback::player_set_autoplay,
+            playback::set_sleep_timer,
+            playback::sleep_timer_state,
+            playback::presence,
+            playback::set_toggle,
             auth::google_login,
             update::check_update,
             update::install_update,

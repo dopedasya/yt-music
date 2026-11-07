@@ -100,9 +100,12 @@ export const player = {
   },
 };
 
+// Tell Rust what's playing (Discord "Listening to"); it reads the track from its queue.
+const reportPresence = () => api.presence(!audio.paused && !audio.ended, audio.currentTime || 0).catch(() => {});
 audio.addEventListener('play', () => emit('state'));
-audio.addEventListener('pause', () => emit('state'));
-audio.addEventListener('playing', () => { failures = 0; emit('state'); });
+audio.addEventListener('pause', () => { emit('state'); reportPresence(); });
+audio.addEventListener('seeked', reportPresence);
+audio.addEventListener('playing', () => { failures = 0; emit('state'); reportPresence(); });
 audio.addEventListener('timeupdate', () => emit('time'));
 audio.addEventListener('progress', () => emit('time'));
 audio.addEventListener('durationchange', () => emit('time'));

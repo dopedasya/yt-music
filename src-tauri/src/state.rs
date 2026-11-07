@@ -22,7 +22,18 @@ pub struct Core {
     /// Random per-run secret in every stream URL, so other programs on the machine can't
     /// use the local server (e.g. to pull decrypted offline tracks).
     pub stream_token: String,
+    pub sleep: Mutex<SleepTimer>,
+    pub discord: crate::integrations::Discord,
     vault_key: Mutex<Option<vault::Key>>,
+}
+
+/// Sleep timer: stop after a deadline, or when the current track ends.
+#[derive(Default)]
+pub struct SleepTimer {
+    /// Bumped on every change so stale timer tasks know they were cancelled.
+    pub generation: u64,
+    pub deadline_ms: Option<i64>,
+    pub end_of_track: bool,
 }
 
 fn random_token() -> String {
@@ -48,6 +59,8 @@ impl Core {
             downloading: Default::default(),
             queue: tokio::sync::Mutex::new(queue),
             stream_token: random_token(),
+            sleep: Mutex::new(SleepTimer::default()),
+            discord: crate::integrations::Discord::start(),
             vault_key: Mutex::new(None),
         }
     }

@@ -325,6 +325,14 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
         google_login_supported: cfg!(desktop),
         chart_region: chart_region(&core),
         detected_region: detected_region(),
+        notify_tracks: crate::integrations::enabled(&core, "notify_tracks"),
+        discord_presence: crate::integrations::enabled(&core, "discord_presence"),
+        #[cfg(desktop)]
+        discord_available: !crate::integrations::DISCORD_CLIENT_ID.is_empty(),
+        #[cfg(mobile)]
+        discord_available: false,
+        global_hotkeys: crate::integrations::enabled(&core, "global_hotkeys"),
+        hotkeys_supported: cfg!(desktop),
     })
 }
 

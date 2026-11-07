@@ -166,6 +166,12 @@ pub struct Settings {
     pub chart_region: String,
     /// Country detected from the OS regional settings (used when "auto").
     pub detected_region: String,
+    pub notify_tracks: bool,
+    pub discord_presence: bool,
+    /// False when this build has no Discord application id.
+    pub discord_available: bool,
+    pub global_hotkeys: bool,
+    pub hotkeys_supported: bool,
 }
 
 #[derive(Serialize)]

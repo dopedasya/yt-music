@@ -34,6 +34,10 @@ export const api = {
   toggleShuffle: () => invoke('player_toggle_shuffle'),
   cycleRepeat: () => invoke('player_cycle_repeat'),
   setAutoplay: (on) => invoke('player_set_autoplay', { on }),
+  setSleepTimer: (minutes, endOfTrack = false) => invoke('set_sleep_timer', { minutes, endOfTrack }),
+  sleepState: () => invoke('sleep_timer_state'),
+  presence: (playing, position) => invoke('presence', { playing, position }),
+  setToggle: (key, on) => invoke('set_toggle', { key, on }),
 
   // Library
   likedTracks: () => invoke('liked_tracks'),

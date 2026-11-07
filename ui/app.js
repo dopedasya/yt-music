@@ -461,6 +461,13 @@ const views = {
         <label class="check"><input type="checkbox" id="autoplay" ${player.autoplay ? 'checked' : ''}> ${esc(t('set.autoplay'))}</label>
       </section>
       <section class="set-block">
+        <h2>${esc(t('int.title'))}</h2>
+        <label class="check"><input type="checkbox" data-toggle="notify_tracks" ${s.notify_tracks ? 'checked' : ''}> ${esc(t('int.notify'))}</label>
+        ${s.discord_available ? `<label class="check"><input type="checkbox" data-toggle="discord_presence" ${s.discord_presence ? 'checked' : ''}> ${esc(t('int.discord'))}</label>` : ''}
+        ${s.hotkeys_supported ? `<label class="check"><input type="checkbox" data-toggle="global_hotkeys" ${s.global_hotkeys ? 'checked' : ''}> ${esc(t('int.hotkeys'))}</label>
+          <p class="muted small hotkey-list"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> ${esc(t('int.hkToggle'))} · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>→</kbd> ${esc(t('int.hkNext'))} · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> ${esc(t('int.hkPrev'))} · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>L</kbd> ${esc(t('int.hkLike'))}</p>` : ''}
+      </section>
+      <section class="set-block">
         <h2>${esc(t('upd.title'))}</h2>
         <p id="upd-status" class="muted">${esc(updateStatusText())}</p>
         <div class="row">
@@ -491,6 +498,12 @@ const afterRender = {
       if (f) $('#cookie-text').value = await f.text();
     });
     $('#autoplay')?.addEventListener('change', (e) => player.setAutoplay(e.target.checked));
+    $$('input[data-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
+      try {
+        await api.setToggle(cb.dataset.toggle, cb.checked);
+        if (cb.dataset.toggle === 'discord_presence') api.presence(player.playing, audio.currentTime || 0).catch(() => {});
+      } catch (e) { toast(errText(e), 'err'); }
+    }));
     $$('input[name=dlq]').forEach((r) => r.addEventListener('change', async () => {
       try { await api.setDownloadQuality(r.value); toast(t('toast.settingsSaved')); } catch (e) { toast(errText(e), 'err'); }
     }));
@@ -1027,6 +1040,64 @@ listen('download-progress', (p) => {
   });
 });
 
+// ---------------------------------------------------------------- sleep timer (logic in Rust)
+let sleepTick = null;
+function showSleep(st) {
+  const btn = $('#btn-sleep');
+  const left = $('#sleep-left');
+  clearInterval(sleepTick);
+  const active = st.remaining_s != null || st.end_of_track;
+  btn.classList.toggle('on', active);
+  if (st.end_of_track) { left.textContent = '♪'; return; }
+  if (st.remaining_s == null) { left.textContent = ''; return; }
+  let s = st.remaining_s;
+  const draw = () => { left.textContent = s >= 60 ? `${Math.ceil(s / 60)}′` : `${s}″`; };
+  draw();
+  sleepTick = setInterval(() => { s = Math.max(0, s - 1); draw(); if (!s) clearInterval(sleepTick); }, 1000);
+}
+async function setSleep(minutes, endOfTrack = false) {
+  try {
+    const st = await api.setSleepTimer(minutes, endOfTrack);
+    showSleep(st);
+    toast(minutes ? t('sleep.set', { n: minutes }) : endOfTrack ? t('sleep.endSet') : t('sleep.off'));
+  } catch (e) { toast(errText(e), 'err'); }
+}
+$('#btn-sleep').onclick = (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  const items = [15, 30, 45, 60, 90].map((m) => ({ label: t('sleep.min', { n: m }), run: () => setSleep(m) }));
+  items.push({ label: t('sleep.end'), run: () => setSleep(null, true) }, '-', { label: t('sleep.cancel'), run: () => setSleep(null, false) });
+  showMenu(r.left, r.top - 8 - items.length * 36, items);
+};
+// Fire: fade out over ~4 s, pause, restore volume.
+listen('sleep-timer', () => {
+  showSleep({ remaining_s: null, end_of_track: false });
+  const start = audio.volume;
+  let k = 0;
+  const fade = setInterval(() => {
+    k++;
+    audio.volume = Math.max(0, start * (1 - k / 20));
+    if (k >= 20) { clearInterval(fade); audio.pause(); audio.volume = start; toast(t('sleep.fired')); }
+  }, 200);
+});
+
+// ---------------------------------------------------------------- global hotkeys (desktop)
+listen('hotkey', (action) => {
+  if (action === 'toggle') player.toggle();
+  else if (action === 'next') player.next();
+  else if (action === 'prev') player.prev();
+  else if (action === 'like' && player.current) toggleLike(player.current);
+});
+
+// "Add to playlist" from the player bar.
+$('#np-add').onclick = (e) => {
+  const cur = player.current;
+  if (!cur) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const items = [{ label: t('menu.newPlaylist'), run: () => newPlaylist([cur]) },
+    ...state.playlists.map((p) => ({ label: p.name, run: () => addTo(p, [cur]) }))];
+  showMenu(r.left, r.top - 8 - Math.min(items.length, 8) * 36, items);
+};
+
 // ---------------------------------------------------------------- updates
 const upd = { info: null, error: null, busy: false };
 
@@ -1102,6 +1173,7 @@ listen('google-login-closed', () => { if (nav.stack[nav.pos]?.view === 'settings
   await player.restore().catch((e) => console.error(e));
   updateNowPlaying();
   go('home');
+  api.sleepState().then(showSleep).catch(() => {});
   // Quietly look for a new version a few seconds after start.
   setTimeout(() => checkForUpdate(false), 4000);
 })();

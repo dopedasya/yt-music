@@ -467,3 +467,14 @@ code { background: var(--elev); padding: 1px 6px; border-radius: 4px; font-size:
 .update-btn:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
 
 .settings .sub-h { font-size: 16px; margin-top: 20px; }
+
+/* ------------------------------------------------------------ sleep timer, hotkeys */
+.sleep-btn { position: relative; gap: 2px; grid-auto-flow: column; border-radius: 999px; padding: 6px 8px; }
+.sleep-btn #sleep-left { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sleep-btn #sleep-left:empty { display: none; }
+.sleep-btn.on::after { display: none; }
+#np-add .ic { width: 18px; height: 18px; }
+#player.idle #np-add { opacity: .45; pointer-events: none; }
+kbd { font: 600 11px/1 "Segoe UI", system-ui, sans-serif; background: var(--hover); border: 1px solid #ffffff22; border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; color: var(--text); }
+.hotkey-list { line-height: 2.2; margin-top: 4px; }
+.settings .check { margin: 8px 0; }

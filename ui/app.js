@@ -162,8 +162,11 @@ function card(kind, item) {
   </div>`;
 }
 
-const shelf = (title, items, kind) => !items?.length ? '' :
-  `<section class="shelf"><h2>${esc(title)}</h2><div class="grid">${items.map((i) => card(kind, i)).join('')}</div></section>`;
+/** Section heading: optional mono "// label" above the title, optional right-hand content. */
+const secHead = (title, label = '', right = '') => `<div class="sec-head"><div>${label ? `<div class="sec-label">// ${esc(label)}</div>` : ''}<h2>${esc(title)}</h2></div>${right}</div>`;
+
+const shelf = (title, items, kind, label = '') => !items?.length ? '' :
+  `<section class="shelf">${secHead(title, label)}<div class="grid">${items.map((i) => card(kind, i)).join('')}</div></section>`;
 
 function collectionHeader({ cover, kind, title, meta, round = false, actions = '', phClass = '' }) {
   return `<div class="hero">
@@ -185,6 +188,8 @@ const collectionActions = () => playBtn('play-page') + actBtn('shuffle-page', 's
 // cached data of the currently rendered collection page, used by action buttons
 let pageTracks = [];
 let pageCtx = null;
+// recently played tracks shown on the home page (seed for "Start radio")
+let homeRecent = [];
 
 // ---------------------------------------------------------------- views
 const views = {
@@ -202,17 +207,31 @@ const views = {
       { go: 'liked', title: t('lib.liked'), cls: 'liked-cover', ic: 'heart-fill' },
       ...state.playlists.slice(0, 5).map((p) => ({ go: 'local-playlist', id: p.id, title: p.name, cover: p.cover })),
     ];
-    let html = `<div class="page home"><h1 class="greet">${esc(greet)}</h1>
+    homeRecent = recent;
+    const name = state.settings.account_name;
+    const heroLabel = name ? `${greet}, ${name}` : greet;
+    let html = `<div class="page home">
+      <section class="home-hero">
+        <div class="sec-label">// ${esc(heroLabel)}</div>
+        <h1>${esc(t('home.heroTitle'))}</h1>
+        <p>${esc(t('home.heroSub'))}</p>
+        <div class="status-chip"><i class="dot"></i>${esc(t('home.heroChip', { liked: state.liked.size, offline: state.downloaded.size }))}</div>
+        <div class="hero-ctas">
+          <button class="pill-btn primary big" data-act="play-liked" ${state.liked.size ? '' : 'disabled'}>${icon('play')}${esc(t('home.playLiked'))}</button>
+          ${recent.length ? `<button class="pill-btn big" data-act="radio-recent">${icon('radio')}${esc(t('home.startRadio'))}</button>` : ''}
+        </div>
+      </section>
+      <section class="shelf">${secHead(t('home.quick'), t('home.lbl.quick'))}
       <div class="quick">${quick.map((q) => `<div class="quick-item" data-go="${q.go}" data-id="${esc(q.id ?? '')}">
         ${q.cover ? `<img src="${esc(q.cover)}" alt="">` : `<span class="qc ${q.cls || ''}">${icon(q.ic || 'music')}</span>`}
-        <span>${esc(q.title)}</span></div>`).join('')}</div>`;
-    if (recent.length) html += `<section class="shelf"><h2>${esc(t('home.recent'))}</h2>${trackRows(recent, { header: false, album: false })}</section>`;
+        <span>${esc(q.title)}</span></div>`).join('')}</div></section>`;
+    if (recent.length) html += `<section class="shelf">${secHead(t('home.recent'), t('home.lbl.history'))}${trackRows(recent, { header: false, album: false })}</section>`;
     for (const s of home.sections || []) {
       const title = t(`sec.${s.title}`);
-      if (s.tracks?.length) html += `<section class="shelf"><h2>${esc(title)}</h2>${trackRows(s.tracks.slice(0, 10), { header: false })}</section>`;
-      html += shelf(title, s.albums, 'album');
-      html += shelf(title, s.playlists, 'playlist');
-      html += shelf(title, s.artists, 'artist');
+      if (s.tracks?.length) html += `<section class="shelf">${secHead(title, t('home.lbl.tracks'))}${trackRows(s.tracks.slice(0, 10), { header: false })}</section>`;
+      html += shelf(title, s.albums, 'album', t('home.lbl.albums'));
+      html += shelf(title, s.playlists, 'playlist', t('home.lbl.playlists'));
+      html += shelf(title, s.artists, 'artist', t('home.lbl.artists'));
     }
     if (home.error) html += `<div class="note">${esc(t('home.recoFail', { e: home.error }))}</div>`;
     return html + '</div>';
@@ -634,6 +653,13 @@ const actions = {
   },
   'new-playlist': () => newPlaylist(),
   'radio-artist': () => { if (pageTracks[0]) startRadio(pageTracks[0]); },
+  'radio-recent': () => { if (homeRecent[0]) startRadio(homeRecent[0]); },
+  'play-liked': async () => {
+    try {
+      const tracks = await api.likedTracks();
+      if (tracks.length) player.playList(tracks, 0, { kind: 'liked', title: t('lib.liked') });
+    } catch (e) { toast(errText(e), 'err'); }
+  },
   'q-remove': (el) => { player.removeAt(Number(el.closest('.qrow').dataset.qidx)); },
   'open-dl-dir': () => api.openDownloadsDir().catch((e) => toast(errText(e), 'err')),
   'save-dl-dir': async () => {

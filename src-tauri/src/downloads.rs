@@ -1,12 +1,12 @@
-//! Offline downloads: fetch the audio stream in bounded chunks and store it encrypted in
-//! our `.ytmc` container (see `vault`). Track metadata lives in the library DB, files are
-//! named by a hash of the video id, so the download folder reveals nothing.
+//! Offline downloads: fetch the audio stream in bounded chunks and save it as is — the
+//! original AAC (.m4a) or Opus (.webm) from YouTube, no re-encoding — named
+//! "Artist - Title", so other players can open it too. Older versions stored encrypted
+//! `.ytmc` files (see `vault`); those still play.
 use crate::models::{DownloadProgress, Track};
 use crate::state::Core;
-use crate::vault;
 use anyhow::{Context, Result, bail};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
@@ -47,25 +47,33 @@ pub fn enqueue(app: AppHandle, core: Arc<Core>, tracks: Vec<Track>) {
     }
 }
 
-/// `<dir>/<first 16 bytes of sha256(id) as hex>.ytmc`
-pub fn file_for(dir: &Path, id: &str) -> PathBuf {
-    let h = Sha256::digest(id.as_bytes());
-    let name: String = h[..16].iter().map(|b| format!("{b:02x}")).collect();
-    dir.join(name).with_extension(vault::EXT)
+/// `<dir>/<Artist> - <Title>.<ext>`; the video id is added if that name is taken.
+pub fn file_for(dir: &Path, t: &Track, ext: &str) -> PathBuf {
+    let artists = t.artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ");
+    let base = safe_name(&if artists.is_empty() { t.title.clone() } else { format!("{artists} - {}", t.title) });
+    let plain = dir.join(format!("{base}.{ext}"));
+    if plain.exists() { dir.join(format!("{base} [{}].{ext}", t.id)) } else { plain }
+}
+
+/// A file name every OS accepts: no reserved characters, no trailing dots or spaces, not too long.
+fn safe_name(s: &str) -> String {
+    let s: String = s.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+    let s: String = s.chars().take(120).collect();
+    let s = s.trim().trim_end_matches(['.', ' ']).to_string();
+    if s.is_empty() { "track".into() } else { s }
 }
 
 async fn download_one(core: &Core, t: &Track, progress: impl Fn(f32) + Sync) -> Result<()> {
     let dir = core.download_dir();
     tokio::fs::create_dir_all(&dir).await.context("couldn't create the download folder")?;
-    let dest = file_for(&dir, &t.id);
-    let key = core.vault_key()?;
     // googlevideo occasionally refuses a freshly issued URL (403); like the playback
     // proxy, drop the cached URL and try once more with a new one.
     let mut attempt = 0;
-    let info = loop {
+    let (info, dest) = loop {
         let info = core.yt.stream(&t.id, core.download_codec()).await?;
-        match fetch_encrypted(core, &info.url, info.size, &info.mime, &key, &dest, &progress).await {
-            Ok(()) => break info,
+        let dest = file_for(&dir, t, if info.mime.contains("webm") { "webm" } else { "m4a" });
+        match fetch_file(core, &info.url, info.size, &dest, &progress).await {
+            Ok(()) => break (info, dest),
             Err(e) if attempt == 0 => {
                 eprintln!("download {} attempt 1 failed ({e:#}); retrying with a fresh URL", t.id);
                 core.yt.invalidate(&t.id);
@@ -79,19 +87,57 @@ async fn download_one(core: &Core, t: &Track, progress: impl Fn(f32) + Sync) -> 
     Ok(())
 }
 
-/// Download in bounded Range chunks (googlevideo rejects open-ended/huge ranges),
-/// encrypting on the fly. Writes to `.part` and renames on success.
-async fn fetch_encrypted(
-    core: &Core,
-    url: &str,
-    size: Option<u64>,
-    mime: &str,
-    key: &vault::Key,
-    dest: &Path,
-    progress: impl Fn(f32),
-) -> Result<()> {
+/// Once after updating from 1.1.0 or older: turn every encrypted `.ytmc` download into a
+/// plain "Artist - Title" file in the download folder, so it plays in other players too.
+/// A file that fails stays as it was (it still plays in the app) and is tried next start.
+pub async fn decrypt_old_downloads(core: &Core) {
+    let Ok(list) = core.db.downloads() else { return };
+    let old: Vec<_> = list.into_iter().filter(|d| d.path.ends_with(&format!(".{}", crate::vault::EXT))).collect();
+    if old.is_empty() {
+        return;
+    }
+    let Ok(key) = core.vault_key() else { return };
+    let dir = core.download_dir();
+    if tokio::fs::create_dir_all(&dir).await.is_err() {
+        return;
+    }
+    // oldest first: re-adding stamps "now", so the list keeps its order
+    for d in old.into_iter().rev() {
+        match decrypt_one(&key, &d.path, &dir, &d.track).await {
+            Ok((dest, size)) => {
+                let codec = d.codec.clone().unwrap_or_else(|| "AAC".into());
+                if core.db.add_download(&d.track, &dest.to_string_lossy(), size, &codec, d.kbps).is_ok() {
+                    let _ = tokio::fs::remove_file(&d.path).await;
+                }
+            }
+            Err(e) => eprintln!("couldn't decrypt {}: {e:#}", d.path),
+        }
+    }
+}
+
+async fn decrypt_one(key: &crate::vault::Key, src: &str, dir: &Path, t: &Track) -> Result<(PathBuf, u64)> {
+    use crate::vault;
+    let mut file = tokio::fs::File::open(src).await?;
+    let h = vault::read_header(&mut file).await?;
+    let len = file.metadata().await?.len().saturating_sub(h.data_start);
+    let dest = file_for(dir, t, if h.mime.contains("webm") { "webm" } else { "m4a" });
     let part = dest.with_extension("part");
-    let mut w = vault::Writer::create(&part, key, mime).await?;
+    let mut out = tokio::fs::File::create(&part).await?;
+    let mut r = vault::RangeReader::open(file, &h, key, 0, len).await?;
+    while let Some(chunk) = r.next_chunk().await? {
+        out.write_all(&chunk).await?;
+    }
+    out.sync_all().await?;
+    drop(out);
+    tokio::fs::rename(&part, &dest).await?;
+    Ok((dest, len))
+}
+
+/// Download in bounded Range chunks (googlevideo rejects open-ended/huge ranges).
+/// Writes to `.part` and renames on success.
+async fn fetch_file(core: &Core, url: &str, size: Option<u64>, dest: &Path, progress: impl Fn(f32)) -> Result<()> {
+    let part = dest.with_extension("part");
+    let mut w = tokio::fs::File::create(&part).await?;
     let mut total = size;
     let mut done: u64 = 0;
     let mut last_emit = Instant::now();
@@ -119,7 +165,7 @@ async fn fetch_encrypted(
             let mut resp = resp;
             let mut got = 0u64;
             while let Some(chunk) = resp.chunk().await? {
-                w.write(&chunk).await?;
+                w.write_all(&chunk).await?;
                 got += chunk.len() as u64;
                 done += chunk.len() as u64;
                 if last_emit.elapsed().as_millis() > 300 {
@@ -143,7 +189,9 @@ async fn fetch_encrypted(
 
     match result {
         Ok(()) => {
-            w.finish().await?;
+            w.flush().await?;
+            w.sync_all().await?;
+            drop(w);
             tokio::fs::rename(&part, dest).await?;
             Ok(())
         }
@@ -156,35 +204,60 @@ async fn fetch_encrypted(
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ArtistRef;
+
+    #[tokio::test]
+    async fn old_encrypted_download_becomes_a_plain_file() {
+        let dir = std::env::temp_dir().join(format!("ytubem-dec-{}", crate::db::now()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = crate::vault::Key::generate().unwrap();
+        let src = dir.join("x.ytmc");
+        let data: Vec<u8> = (0..700_000u32).map(|i| (i % 251) as u8).collect();
+        let mut w = crate::vault::Writer::create(&src, &key, "audio/webm").await.unwrap();
+        w.write(&data).await.unwrap();
+        w.finish().await.unwrap();
+        let t = Track { id: "id1".into(), title: "Song".into(), artists: vec![ArtistRef { id: None, name: "Band".into() }], album: None, duration: None, cover: None, plays: None };
+        let (dest, size) = decrypt_one(&key, src.to_str().unwrap(), &dir, &t).await.unwrap();
+        assert_eq!(dest.file_name().unwrap(), "Band - Song.webm");
+        assert_eq!(size, data.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), data);
+    }
+
+    #[test]
+    fn readable_safe_file_names() {
+        let dir = std::env::temp_dir().join(format!("ytubem-names-{}", crate::db::now()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = Track { id: "abc".into(), title: "What? / Why: *Now*.".into(), artists: vec![ArtistRef { id: None, name: "AC/DC".into() }], album: None, duration: None, cover: None, plays: None };
+        let p = file_for(&dir, &t, "m4a");
+        assert_eq!(p.file_name().unwrap(), "AC_DC - What_ _ Why_ _Now_.m4a");
+        std::fs::write(&p, b"x").unwrap();
+        assert_eq!(file_for(&dir, &t, "m4a").file_name().unwrap(), "AC_DC - What_ _ Why_ _Now_ [abc].m4a");
+    }
+}
+
+#[cfg(test)]
 mod live_tests {
     use super::*;
     use crate::yt::Codec;
 
     #[tokio::test]
     #[ignore]
-    async fn live_download_encrypted() {
+    async fn live_download_plain() {
         let core = crate::state::test_core();
         let t = core.yt.search("Okean Elzy Obiymy").await.unwrap().tracks.remove(0);
         let dir = core.download_dir();
         tokio::fs::create_dir_all(&dir).await.unwrap();
         for codec in [Codec::Aac, Codec::Opus] {
             let info = core.yt.stream(&t.id, codec).await.unwrap();
-            let dest = dir.join(format!("test-{codec:?}.ytmc"));
-            let key = core.vault_key().unwrap();
-            let start = Instant::now();
-            fetch_encrypted(&core, &info.url, info.size, &info.mime, &key, &dest, |_| {}).await.unwrap();
-            let len = std::fs::metadata(&dest).unwrap().len();
-            println!("{codec:?}: {} {:?} kbps, {} bytes in {:?}", info.mime, info.kbps, len, start.elapsed());
-            // decrypting the first bytes must give the container signature back
-            let mut f = tokio::fs::File::open(&dest).await.unwrap();
-            let h = vault::read_header(&mut f).await.unwrap();
-            let mut r = vault::RangeReader::open(f, &h, &key, 0, 16).await.unwrap();
-            let head = r.next_chunk().await.unwrap().unwrap();
+            let dest = dir.join(format!("test-{codec:?}"));
+            fetch_file(&core, &info.url, info.size, &dest, |_| {}).await.unwrap();
+            let head = std::fs::read(&dest).unwrap();
             match codec {
                 Codec::Aac => assert_eq!(&head[4..8], b"ftyp", "MP4 signature"),
                 Codec::Opus => assert_eq!(&head[..4], [0x1A, 0x45, 0xDF, 0xA3], "WebM/EBML signature"),
             }
-            assert!(info.size.is_none_or(|s| len >= s), "complete file");
             std::fs::remove_file(&dest).ok();
         }
     }

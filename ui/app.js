@@ -544,7 +544,7 @@ const views = {
     const active = [...state.dlProgress.values()].filter((p) => p.state === 'queued' || p.state === 'downloading');
     return `<div class="page">${collectionHeader({
       cover: null, kind: t('kind.offline'), title: t('lib.downloads'),
-      meta: `${tracksLabel(tracks.length)} · ${(size / 1048576).toFixed(0)} MB · ${icon('lock')} ${esc(t('dl.encrypted'))}`,
+      meta: `${tracksLabel(tracks.length)} · ${(size / 1048576).toFixed(0)} MB · ${esc(t('dl.encrypted'))}`,
       actions: playBtn('play-page') + actBtn('shuffle-page', 'shuffle', t('act.shuffle')), phClass: 'dl-cover',
     })}
     ${active.length ? `<div class="note">${esc(t('dl.active', { n: active.length }))}</div>` : ''}

@@ -11,11 +11,16 @@
 //! The key is generated per install and stored in the app database. This keeps files
 //! from being copied around as plain music; it is not meant to resist someone who
 //! extracts the key from the same machine.
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
+#[cfg(test)]
+use anyhow::anyhow;
 use chacha20::ChaCha20;
 use chacha20::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
+#[cfg(test)]
 use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+#[cfg(test)]
+use tokio::io::AsyncWriteExt;
 
 const MAGIC: &[u8; 4] = b"YTMC";
 const VERSION: u8 = 1;
@@ -69,11 +74,14 @@ fn cipher(key: &Key, nonce: &[u8; 12], offset: u64) -> ChaCha20 {
 }
 
 /// Streaming writer: header first, then encrypted chunks as they arrive.
+/// Downloads are plain files since 1.1.1; this stays for the tests of the reader.
+#[cfg(test)]
 pub struct Writer {
     file: tokio::fs::File,
     cipher: ChaCha20,
 }
 
+#[cfg(test)]
 impl Writer {
     pub async fn create(path: &Path, key: &Key, mime: &str) -> Result<Self> {
         let mut nonce = [0u8; 12];

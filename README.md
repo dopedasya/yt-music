@@ -41,7 +41,7 @@ A fast, unofficial YouTube Music client for Windows, macOS, Linux and Android, w
 - Sign in with Google to bring your YouTube likes and playlists; account menu on your avatar (sync, switch account, sign out)
 - Select several songs, or all of them, on any page: play next, add to a playlist, download or remove at once
 - Likes and unlikes reach your YouTube Music account
-- Offline downloads (high or standard quality), stored encrypted in the app's own `.ytmc` format, so they play only inside YT Music
+- Offline downloads (high or standard quality) saved as plain `.m4a` / `.webm` files named "Artist - Title" (in your Music folder on desktop), so other players can open them too
 
 **App**
 - Glass design (by [@dopedasya](https://github.com/dopedasya)) in dark, light or system mode, with the cover's colour as ambient light
@@ -97,7 +97,7 @@ src-tauri/src/
   ytdlp.rs          yt-dlp (desktop): installed and updated automatically, checksum-verified
   jsplayer.rs       solves YouTube's stream challenges without yt-dlp (Android)
   server.rs         local 127.0.0.1 server for <audio> (Range/seeking, decrypts offline files)
-  vault.rs          encrypted offline container (.ytmc, ChaCha20, seekable)
+  vault.rs          reads encrypted downloads from 1.1.0 and older (they are turned into plain files on update)
   downloads.rs      chunked downloads straight into the vault
   lyrics.rs         LRCLIB lookup, fuzzy matching, LRC parsing
   recommend.rs      "made for you" mixes from your history and likes
@@ -108,7 +108,7 @@ src-tauri/src/
 ```
 
 - **Metadata** (search, albums, artists, charts, radio, account) comes from [rustypipe](https://codeberg.org/ThetaDev/rustypipe).
-- **Audio on desktop:** every song goes through [yt-dlp](https://github.com/yt-dlp/yt-dlp), signed in with your session when you're logged in, so 18+ songs play too. The fast built-in resolvers start a song, and the yt-dlp URL for the same format takes over in the background.
+- **Audio on desktop:** the same path as on Android (below): the built-in resolvers, signed in for 18+ songs. [yt-dlp](https://github.com/yt-dlp/yt-dlp) is only the last resort when they fail.
 - **Audio on Android** (no yt-dlp): a direct InnerTube `player` request with the visionOS client races rustypipe. For 18+ songs the app makes a signed request and solves the stream URL challenges with yt-dlp's own solver ([yt-dlp/ejs](https://github.com/yt-dlp/ejs), Unlicense) running in the webview's JS engine; the parsed player is cached on disk.
 - googlevideo rejects open-ended ranges, so the local proxy fetches upstream in bounded 4 MB chunks and stitches them into one stream. Seeking works, and stream URLs never reach the web layer.
 

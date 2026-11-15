@@ -56,6 +56,9 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             // Offline tracks are encrypted `.ytmc` files, so they live with the app data
             // rather than in the user's music folder.
+            #[cfg(desktop)]
+            let default_download_dir = app.path().audio_dir().map(|d| d.join("YT Music")).unwrap_or_else(|_| data_dir.join("offline"));
+            #[cfg(mobile)]
             let default_download_dir = data_dir.join("offline");
 
             let db = db::Db::open(&data_dir.join("library.db"))?;
@@ -91,6 +94,9 @@ pub fn run() {
                     }
                 });
             }
+            // Downloads from 1.1.0 and older are encrypted: make them plain files, in the background.
+            let dec = core.clone();
+            tauri::async_runtime::spawn(async move { downloads::decrypt_old_downloads(&dec).await });
             app.manage(core);
             jsplayer::attach(app.handle().clone());
             // Our own title bar (ui: #topbar + window buttons) instead of the system frame.

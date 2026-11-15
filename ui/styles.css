@@ -1024,3 +1024,6 @@ body.selecting #main .trow.sel { background: color-mix(in srgb, var(--accent) 14
 /* Back from an album / artist / playlist page: stays at the top-left while scrolling. */
 .page-back { position: sticky; top: var(--s3); z-index: 3; display: grid; margin: var(--s2) 0 var(--s2); width: 40px; height: 40px;
   background: var(--surface-dense); border: 1px solid var(--stroke); backdrop-filter: var(--blur); }
+/* Artist page: the photo runs to the top edge, so the back button floats over it instead of
+   taking a row of its own (that row showed as an empty strip above the photo). */
+.page-back:has(+ .artist-hero) { margin-bottom: calc(-40px - var(--s2)); }

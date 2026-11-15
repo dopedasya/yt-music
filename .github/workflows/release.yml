@@ -50,15 +50,9 @@ jobs:
             echo '| Platform | File |'
             echo '|---|---|'
             echo '| Windows | `*_Windows-x64-setup.exe` |'
-            echo '| macOS (Apple Silicon: M1/M2/M3/M4) | `*_macOS-Apple-Silicon.dmg` |'
-            echo '| macOS (Intel) | `*_macOS-Intel.dmg` |'
-            echo '| Linux (Debian/Ubuntu) | `*_Linux-x64.deb` |'
-            echo '| Android | `*_Android.apk` |'
-            echo '| iPhone (beta, iOS 14+) | `*-beta_iOS-unsigned.ipa`, installed with AltStore or Sideloadly |'
+            echo '| Android | `*_Android.apk` (allow installing from unknown sources) |'
             echo
-            echo 'The iPhone build is a beta and is not signed: AltStore / Sideloadly sign it with your own Apple ID (with a free Apple ID it has to be refreshed every 7 days).'
-            echo
-            echo 'macOS builds are not notarized: right-click the app → Open the first time.'
+            echo 'macOS, Linux and iPhone are archived for now and will be released later.'
             echo
             echo 'Unofficial YouTube Music client. Not affiliated with Google LLC.'
             [ -n "$PREV" ] && echo && echo "**Full diff:** https://github.com/$GITHUB_REPOSITORY/compare/$PREV...$GITHUB_REF_NAME"
@@ -77,15 +71,17 @@ jobs:
           - platform: windows-latest
             args: ''
             asset: 'YT.Music_[version]_Windows-x64[setup][ext]'
-          - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
-            asset: 'YT.Music_[version]_macOS-Apple-Silicon[ext]'
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
-            asset: 'YT.Music_[version]_macOS-Intel[ext]'
-          - platform: ubuntu-22.04
-            args: '--bundles deb'
-            asset: 'YT.Music_[version]_Linux-x64[ext]'
+          # macOS and Linux are archived for now (only Windows and Android are released).
+          # To bring them back, uncomment these and their rows in the notes above.
+          # - platform: macos-latest
+          #   args: '--target aarch64-apple-darwin'
+          #   asset: 'YT.Music_[version]_macOS-Apple-Silicon[ext]'
+          # - platform: macos-latest
+          #   args: '--target x86_64-apple-darwin'
+          #   asset: 'YT.Music_[version]_macOS-Intel[ext]'
+          # - platform: ubuntu-22.04
+          #   args: '--bundles deb'
+          #   asset: 'YT.Music_[version]_Linux-x64[ext]'
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,7 +223,8 @@ jobs:
   # It comes last and on its own: a failed iOS build must not hold back the other platforms.
   ios:
     needs: build
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    # archived for now: only Windows and Android are released (drop "false &&" to bring it back)
+    if: ${{ false && !cancelled() && needs.build.result == 'success' }}
     permissions:
       contents: read
     uses: ./.github/workflows/ios.yml

@@ -17,6 +17,7 @@ export const api = {
   album: (id) => invoke('get_album', { id }),
   artist: (id) => invoke('get_artist', { id }),
   artistReleases: (id) => invoke('get_artist_releases', { id }),
+  artistSongs: (id) => invoke('get_artist_songs', { id }),
   playlist: (id) => invoke('get_playlist', { id }),
   radio: (id) => invoke('get_radio', { id }),
   lyrics: (track) => invoke('get_lyrics', { track }),

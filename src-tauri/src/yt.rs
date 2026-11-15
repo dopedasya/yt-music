@@ -340,6 +340,25 @@ impl Yt {
         })
     }
 
+    /// All of an artist's songs: YouTube's own "Songs" list when the artist page links one,
+    /// otherwise (some artists have none) a search for the name, keeping only their songs.
+    pub async fn artist_songs(&self, id: &str) -> Result<Vec<Track>> {
+        let qr = self.rp.query();
+        let a = qr.music_artist(id, false).await?;
+        if let Some(pl) = a.tracks_playlist_id.as_deref()
+            && let Ok(p) = self.playlist(pl, false).await
+            && !p.tracks.is_empty()
+        {
+            return Ok(p.tracks);
+        }
+        let mut r = qr.music_search_tracks(&a.name).await?;
+        r.items.extend_limit(&qr, 200).await.ok();
+        let mut seen = std::collections::HashSet::new();
+        Ok(r.items.items.into_iter().filter(song).map(track)
+            .filter(|t| t.artists.iter().any(|x| x.id.as_deref() == Some(id)) && seen.insert(t.id.clone()))
+            .collect())
+    }
+
     /// The artist page lists only some releases; this asks for all of them (more requests).
     pub async fn artist_releases(&self, id: &str) -> Result<ArtistReleases> {
         let a = self.rp.query().music_artist(id, true).await?;

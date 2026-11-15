@@ -155,7 +155,7 @@ window.addEventListener('popstate', () => {
 const nav = { stack: [], pos: -1 };
 let renderToken = 0;
 const LAYERS = ['library', 'history', 'downloads'];
-const DETAIL = ['album', 'artist', 'playlist', 'local-playlist', 'artist-releases'];
+const DETAIL = ['album', 'artist', 'playlist', 'local-playlist', 'artist-releases', 'artist-songs'];
 const layerName = (v) => ({ home: t('layer.forYou'), library: t('nav.library'), history: t('lib.history'), downloads: t('lib.downloads') }[v]);
 
 function go(view, params = {}, push = true) {
@@ -477,6 +477,14 @@ const views = {
     ${a.description ? `<p class="desc">${esc(a.description)}</p>` : ''}</div>`;
   },
 
+  async 'artist-songs'({ id, name }) {
+    const tracks = await api.artistSongs(id);
+    pageTracks = tracks; pageCtx = { kind: 'artist-songs', id, title: name };
+    return `<div class="page"><div class="hero-text"><div class="hero-kind">${esc(name || '')}</div><h1>${esc(t('artist.songs'))}</h1>
+      <div class="hero-meta">${esc(tracksLabel(tracks.length))}</div></div>
+      <div class="actions">${playBtn('play-page')}${actBtn('shuffle-page', 'shuffle', t('act.shuffle'))}${actBtn('select-mode', 'check', t('act.select'))}</div>
+      ${trackRows(tracks, { ctx: pageCtx, plays: true })}</div>`;
+  },
   async 'artist-releases'({ id, name, which }) {
     const r = await api.artistReleases(id);
     const items = which === 'singles' ? r.singles : r.albums;
@@ -496,7 +504,7 @@ const views = {
       </div></div>
       <div class="page artist">
       ${a.tracks.length ? `<section class="shelf"><h2>${esc(t('artist.popular'))}</h2>${trackRows(a.tracks.slice(0, 10), { ctx: pageCtx, plays: true })}
-        ${a.tracks_playlist_id ? `<div><button class="pill-btn" data-go="playlist" data-id="${esc(a.tracks_playlist_id)}">${esc(t('act.showAll'))}</button></div>` : ''}</section>` : ''}
+        <div><button class="pill-btn" data-act="artist-songs" data-id="${esc(id)}" data-name="${esc(a.name)}">${esc(t('act.showAll'))}</button></div></section>` : ''}
       ${releases(t('artist.albums'), a.albums, id, a.name, 'albums')}
       ${releases(t('artist.singles'), a.singles, id, a.name, 'singles')}
       ${carousel(t('artist.playlists'), a.playlists, 'playlist')}
@@ -1150,6 +1158,7 @@ const actions = {
   'close-overlay': () => closeOverlays(),
   'to-stage': () => toStage(),
   'nav-back': () => navBack(),
+  'artist-songs': (el) => go('artist-songs', { id: el.dataset.id, name: el.dataset.name }),
   'artist-all': (el) => go('artist-releases', { id: el.dataset.id, name: el.dataset.name, which: el.dataset.which }),
   'select-mode': () => selectMode(!selecting()),
   'sel-close': () => selectMode(false),

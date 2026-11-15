@@ -127,6 +127,7 @@ pub fn run() {
             commands::get_album,
             commands::get_artist,
             commands::get_artist_releases,
+            commands::get_artist_songs,
             commands::get_playlist,
             commands::get_radio,
             commands::get_lyrics,

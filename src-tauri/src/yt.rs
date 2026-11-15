@@ -70,13 +70,6 @@ pub struct Yt {
     ytdlp_slots: tokio::sync::Semaphore,
     /// One resolve per track id at a time; a second caller waits and reuses the cached URL.
     inflight: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
-    /// Tracks whose fast (built-in) stream URL died while playing: resolve these with yt-dlp.
-    distrust: Mutex<std::collections::HashSet<String>>,
-    /// Tracks resolved by the fast path that have no yt-dlp backup yet (see backup()).
-    fast: Mutex<std::collections::HashSet<String>>,
-    /// Format (itag) each track started playing in: a replacement URL must be the same file,
-    /// or the bytes already played wouldn't line up with the rest.
-    itags: Mutex<HashMap<String, String>>,
     /// YouTube player challenge solver (signed-in playback without yt-dlp, e.g. Android).
     solver: crate::jsplayer::Solver,
 }
@@ -213,9 +206,6 @@ impl Yt {
             ytdlp_dir,
             ytdlp_slots: tokio::sync::Semaphore::new(3),
             inflight: Mutex::new(HashMap::new()),
-            distrust: Mutex::new(std::collections::HashSet::new()),
-            fast: Mutex::new(std::collections::HashSet::new()),
-            itags: Mutex::new(HashMap::new()),
             solver,
         })
     }
@@ -510,15 +500,9 @@ impl Yt {
     }
 
     // ------------------------------------------------------------ streams
-    /// The stream server calls this when a URL turned out dead or forbidden: forget it, and
-    /// resolve this track the slow, sure way (yt-dlp) next time.
+    /// The stream server calls this when a URL turned out dead or forbidden: forget it.
     pub fn invalidate(&self, id: &str) {
         self.streams.lock().unwrap().retain(|(k, _), _| k != id);
-        let mut d = self.distrust.lock().unwrap();
-        if d.len() > 500 {
-            d.clear();
-        }
-        d.insert(id.to_string());
     }
 
     fn cached(&self, key: &(String, Codec)) -> Option<StreamInfo> {
@@ -526,15 +510,8 @@ impl Yt {
     }
 
     /// Resolve an audio URL in the requested codec (falls back to whatever exists),
-    /// cached until shortly before it expires.
-    ///
-    /// Fast start, sure finish. The built-in resolvers answer in about a second, so a track
-    /// starts from them: the anonymous clients, then (sign-in-only songs such as 18+) a signed
-    /// request as your account with the player challenges solved in the app. Their URLs can
-    /// die mid-song, so on desktop the track that is actually playing also gets a yt-dlp URL
-    /// for the *same* format in the background (see backup()), which quietly replaces the
-    /// fast one; and if the fast URL dies first, yt-dlp resolves that same format, so the
-    /// song goes on from where it was. yt-dlp is also the fallback when the fast path fails.
+    /// cached until shortly before it expires. If a URL dies mid-song, the stream server
+    /// invalidates it and asks again; the song goes on from the same byte.
     pub async fn stream(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
         let key = (id.to_string(), codec);
         if let Some(s) = self.cached(&key) {
@@ -545,51 +522,25 @@ impl Yt {
         if let Some(s) = self.cached(&key) {
             return Ok(s);
         }
-        let ytdlp = cfg!(desktop) && ytdlp::find(&self.ytdlp_dir).is_some();
-        let sure_first = ytdlp && self.distrust.lock().unwrap().contains(id);
-        let fast = async {
-            match self.stream_native_race(id, codec).await {
+        // The same path as on Android: the built-in resolvers (anonymous clients, then a signed
+        // request with the player challenges solved in the app for 18+ songs). On desktop yt-dlp
+        // is only the last resort when those fail.
+        let resolved: Result<StreamInfo> = async {
+            let fast = match self.stream_native_race(id, codec).await {
                 Ok(s) => Ok(s),
                 Err(e) => match self.session_cookie() {
                     Some(cookie) => self.stream_signed(id, codec, &cookie).await.with_context(|| format!("{e:#}")),
                     None => Err(e),
                 },
-            }
-        };
-        let resolved: Result<StreamInfo> = async {
-            Ok(if sure_first {
-            let itag = self.itags.lock().unwrap().get(id).cloned();
-            match self.stream_ytdlp(id, codec, itag.as_deref()).await {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("yt-dlp failed for {id}: {e:#}; using the built-in clients");
-                    fast.await.context("couldn't get an audio stream")?
-                }
-            }
-        } else {
-            match fast.await {
-                Ok(s) => {
-                    if ytdlp && let Some(itag) = url_param(&s.url, "itag") {
-                        let mut f = self.fast.lock().unwrap();
-                        let mut t = self.itags.lock().unwrap();
-                        if f.len() > 500 {
-                            f.clear();
-                        }
-                        if t.len() > 500 {
-                            t.clear();
-                        }
-                        f.insert(id.to_string());
-                        t.insert(id.to_string(), itag);
-                    }
-                    s
-                }
-                Err(e) if ytdlp => {
+            };
+            match fast {
+                Ok(s) => Ok(s),
+                Err(e) if cfg!(desktop) && ytdlp::find(&self.ytdlp_dir).is_some() => {
                     eprintln!("built-in clients failed for {id}: {e:#}; using yt-dlp");
-                    self.stream_ytdlp(id, codec, None).await.context("couldn't get an audio stream")?
+                    self.stream_ytdlp(id, codec).await.context("couldn't get an audio stream")
                 }
-                Err(e) => return Err(e.context("couldn't get an audio stream")),
+                Err(e) => Err(e.context("couldn't get an audio stream")),
             }
-            })
         }
         .await;
         self.inflight.lock().unwrap().remove(id); // on failure too
@@ -905,42 +856,8 @@ impl Yt {
 
     /// yt-dlp fallback. Signed in when a session exists: that's what makes age-restricted
     /// (18+) songs play, which YouTube only serves to signed-in, age-verified accounts.
-    /// True once per fast-resolved track: the caller (the stream server, i.e. the track is
-    /// really being played) should then run backup() in the background.
-    pub fn take_backup_job(&self, id: &str) -> bool {
-        self.fast.lock().unwrap().remove(id)
-    }
-
-    /// Get a yt-dlp URL for the same format as the fast URL in the cache and put it in its
-    /// place: later requests for this track (seeks, the next chunk after a hiccup) then use
-    /// the sure URL. Different format → leave things alone (the bytes wouldn't line up).
-    pub async fn backup(&self, id: &str, codec: Codec) {
-        let key = (id.to_string(), codec);
-        let Some(cur) = self.cached(&key) else { return };
-        let Some(itag) = url_param(&cur.url, "itag") else { return };
-        match self.stream_ytdlp(id, codec, Some(&itag)).await {
-            Ok(mut s) if url_param(&s.url, "itag").as_deref() == Some(itag.as_str()) => {
-                s.size = cur.size;
-                s.kbps = cur.kbps;
-                s.mime = cur.mime.clone();
-                s.codec = cur.codec;
-                let mut m = self.streams.lock().unwrap();
-                if m.get(&key).is_some_and(|c| c.url == cur.url) {
-                    m.insert(key, s);
-                }
-            }
-            Ok(_) => {}
-            Err(e) => eprintln!("yt-dlp backup for {id} failed: {e:#}"),
-        }
-    }
-
-    /// `itag`: ask for exactly this format first (to continue a track that already plays).
-    async fn stream_ytdlp(&self, id: &str, codec: Codec, itag: Option<&str>) -> Result<StreamInfo> {
-        let format = match itag {
-            Some(i) => format!("{i}/{}", codec.ytdlp_format()),
-            None => codec.ytdlp_format().to_string(),
-        };
-        let format = format.as_str();
+    async fn stream_ytdlp(&self, id: &str, codec: Codec) -> Result<StreamInfo> {
+        let format = codec.ytdlp_format();
         let _slot = self.ytdlp_slots.acquire().await?;
         let url = match self.session_cookie() {
             Some(cookie) => {

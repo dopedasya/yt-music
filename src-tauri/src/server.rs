@@ -314,11 +314,6 @@ async fn stream_inner(State(core): State<Arc<Core>>, Path((token, id)): Path<(St
                 break;
             }
         };
-        // Playing from a fast URL: get the sure (yt-dlp) URL for the same format meanwhile.
-        if core.yt.take_backup_job(&id) {
-            let (c, id) = (core.clone(), id.clone());
-            tokio::spawn(async move { c.yt.backup(&id, Codec::Aac).await });
-        }
         match proxy(&core, &id, &info, range.as_deref()).await {
             Ok(r) => return r,
             Err(Upstream::Retry) => {

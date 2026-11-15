@@ -26,7 +26,7 @@ A fast, unofficial YouTube Music client for Windows, macOS, Linux and Android, w
 
 **Listening**
 - Home made for you: your mix and a mix for each favourite artist, from your history and likes; quick picks, top songs chart, new releases, recently played
-- Search songs, albums, artists and playlists with suggestions; album, artist (with play counts) and playlist pages
+- Search songs, albums, artists and playlists with suggestions; album, artist (with play counts) and playlist pages; on an artist, *Show all* opens every song, album and single
 - Songs only: music videos are left out of search, charts, artist pages and radio
 - A player that expands from the bottom bar to full screen: big cover, controls, and *Up next* / *Lyrics* right beside it
 - Queue, shuffle, repeat (all / one), seeking from the bar, volume, sleep timer, media keys
@@ -44,10 +44,10 @@ A fast, unofficial YouTube Music client for Windows, macOS, Linux and Android, w
 - Offline downloads (high or standard quality) saved as plain `.m4a` / `.webm` files named "Artist - Title" (in your Music folder on desktop), so other players can open them too
 
 **App**
-- Glass design (by [@dopedasya](https://github.com/dopedasya)) in dark, light or system mode, with the cover's colour as ambient light
+- Design by [@dopedasya](https://github.com/dopedasya) in dark, light or system mode, tinted with the cover's colour; light effects (no live blur or moving background), so it stays smooth on any computer or phone
 - Own title bar on Windows/Linux; shows up as "YT Music" in the Windows media overlay
 - English, Ukrainian and Russian
-- One-click updates: desktop installs a signed update and restarts; Android downloads the new APK
+- One-click updates: desktop installs a signed update and restarts; Android downloads the new APK. The app checks at start, every 3 hours and when you come back to it
 
 ## Install
 
@@ -67,7 +67,7 @@ Grab the file for your platform from [Releases](../../releases). Each release li
 | Windows | Windows 10 or 11, 64-bit (WebView2 is built in) |
 | Android | Android 7.0+ on a 64-bit ARM phone, with Android System WebView kept up to date (Google Play) |
 
-The desktop apps download [yt-dlp](https://github.com/yt-dlp/yt-dlp) on first start (about 18 MB) to play music. An internet connection is needed except for downloaded songs.
+On first start the desktop app downloads [yt-dlp](https://github.com/yt-dlp/yt-dlp) (about 18 MB) as a backup way to play music if YouTube changes something. An internet connection is needed except for downloaded songs.
 
 ## Build from source
 

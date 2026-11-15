@@ -657,7 +657,7 @@ const views = {
       ${s.ytdlp_supported === false ? '' : `<section class="set-block">
         <h2>${esc(t('set.ytdlp'))}</h2>
         <p class="muted small">${esc(t('set.ytdlpHint'))}</p>
-        <p>${s.ytdlp ? esc(t('set.ytdlpFound')) : esc(t('set.ytdlpMissing'))}</p>
+        <p>${s.ytdlp ? esc(`${t('set.ytdlpFound')} ${s.ytdlp.match(/\(([^)]+)\)$/)?.[1] || ''}`) : esc(t('set.ytdlpMissing'))}</p>
         <div class="row"><button class="pill-btn" data-act="install-ytdlp">${esc(t(s.ytdlp ? 'set.ytdlpUpdate' : 'set.ytdlpInstall'))}</button></div>
       </section>`}
     </div>`;

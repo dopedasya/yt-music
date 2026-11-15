@@ -1028,3 +1028,5 @@ body.selecting #main .trow.sel { background: color-mix(in srgb, var(--accent) 14
 /* Artist page: the photo runs to the top edge, so the back button floats over it instead of
    taking a row of its own (that row showed as an empty strip above the photo). */
 .page-back:has(+ .artist-hero) { margin-bottom: calc(-40px - var(--s2)); }
+/* over the artist photo, which can be light: a white arrow with a firmer shadow */
+.page-back:has(+ .artist-hero) { color: #fff; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, .85)); }

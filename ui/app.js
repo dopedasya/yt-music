@@ -1832,10 +1832,17 @@ function showUpdateButton() {
   if (i?.available && !upd.busy) b.textContent = t('upd.short', { v: i.version });
 }
 
+let updCheckedAt = 0, updToldAbout = null;
 async function checkForUpdate(loud = false) {
+  updCheckedAt = Date.now();
   try {
     upd.info = await api.checkUpdate();
     upd.error = null;
+    // found by a background check: say so once per version, not only with the small badge
+    if (!loud && upd.info?.available && updToldAbout !== upd.info.version) {
+      updToldAbout = upd.info.version;
+      toast(t('upd.short', { v: upd.info.version }));
+    }
   } catch (e) {
     upd.error = errText(e);
     if (loud) toast(t('upd.fail', { e: upd.error }), 'err');
@@ -1921,4 +1928,9 @@ window.__androidLogin = async (cookie) => {
   }
   // Quietly look for a new version a few seconds after start.
   setTimeout(() => checkForUpdate(false), 4000);
+  // and again while it runs: every 3 hours, and on coming back to the app after an hour away
+  setInterval(() => checkForUpdate(false), 3 * 3600e3);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - updCheckedAt > 3600e3) checkForUpdate(false);
+  });
 })();

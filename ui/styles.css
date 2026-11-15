@@ -782,7 +782,7 @@ body.frame-mac #topbar { padding-left: 84px; }
 body[data-mode="browse"]:not(.idle) #capvol { transform: none; opacity: 1; pointer-events: auto; }
 #capvol.open { height: 236px; }
 .capvol-btn { flex: none; width: 70px; height: 70px; display: grid; place-items: center; border-radius: 50%; color: var(--text); }
-.capvol-btn .ic { width: 22px; height: 22px; }
+.capvol-btn .ic { width: 20px; height: 20px; }
 .capvol-btn:hover { background: var(--surface-hover); }
 #capvol output, #capvol input { opacity: 0; transition: opacity 160ms; }
 #capvol.open output, #capvol.open input { opacity: 1; transition-delay: 100ms; }
@@ -988,13 +988,15 @@ html { touch-action: pan-x pan-y; }
 /* Sideways rows show whole cards only (no card cut at the edge): --n per view, the arrows
    move a page, and scrolling snaps to a card. Phones keep a peek of the next card. */
 .mixes { --n: 4; grid-auto-columns: calc((100% - (var(--n) - 1) * 24px) / var(--n)); scroll-snap-type: x mandatory; }
+.carousel-track { --n: 6; grid-auto-columns: calc((100% - (var(--n) - 1) * 24px) / var(--n)); scroll-snap-type: x mandatory; }
 .mix-card { scroll-snap-align: start; }
 .picks { scroll-snap-type: x mandatory; }
 .picks .tracklist { --n: 4; grid-auto-columns: calc((100% - (var(--n) - 1) * var(--s4)) / var(--n)); }
-@media (max-width: 1280px) { .mixes, .picks .tracklist { --n: 3; } }
-@media (max-width: 980px) { .mixes, .picks .tracklist { --n: 2; } }
+@media (max-width: 1280px) { .mixes, .picks .tracklist { --n: 3; } .carousel-track { --n: 5; } }
+@media (max-width: 980px) { .mixes, .picks .tracklist { --n: 2; } .carousel-track { --n: 4; } }
 @media (max-width: 760px) {
   .mixes { grid-auto-columns: 62%; }
+  .carousel-track { grid-auto-columns: 42%; gap: 16px; }
   .picks .tracklist { grid-auto-columns: 85%; }
 }
 
@@ -1010,7 +1012,6 @@ body.selecting #main .trow.sel { background: color-mix(in srgb, var(--accent) 14
   border-radius: var(--r-full); background: var(--surface-dense); border: 1px solid var(--stroke); backdrop-filter: var(--blur); box-shadow: 0 10px 30px var(--shadow); }
 #selbar b { white-space: nowrap; margin-right: var(--s2); }
 #selbar .pill-btn { white-space: nowrap; }
-#selbar .pill-btn.danger { color: var(--danger); }
 @media (max-width: 760px) {
   #selbar { bottom: calc(146px + env(safe-area-inset-bottom, 0px)); flex-wrap: wrap; justify-content: center; border-radius: var(--r-lg); padding: 10px; width: calc(100% - 24px); }
   #selbar b { width: 100%; text-align: center; margin: 0; }

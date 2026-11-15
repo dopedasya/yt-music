@@ -106,7 +106,7 @@ function morph(to) {
   if (to === 'browse') {
     // The capsule is still sliding in; use its resting place.
     const cap = $('#capsule'), app = $('#app').getBoundingClientRect(), art = $('#cap-art');
-    const left = app.left + cap.offsetLeft + art.offsetLeft;
+    const left = app.left + cap.offsetLeft - cap.offsetWidth / 2 + art.offsetLeft;
     r2 = { left, top: app.top + cap.offsetTop + art.offsetTop, width: art.offsetWidth, height: art.offsetHeight };
   } else {
     r2 = $('#stage-art').getBoundingClientRect();
@@ -117,15 +117,16 @@ function morph(to) {
   Object.assign(g.style, { left: `${r1.left}px`, top: `${r1.top}px`, width: `${r1.width}px`, height: `${r1.height}px` });
   document.body.appendChild(g);
   if (to === 'browse') closeSide();
-  const hide = to === 'browse' ? $('#cap-art') : $('.stage-art-wrap');
-  hide.style.visibility = 'hidden';
+  // Only the flying copy is visible on the way: the big cover would otherwise linger as an echo.
+  const hide = [$('#cap-art'), $('.stage-art-wrap')];
+  hide.forEach((h) => { h.style.visibility = 'hidden'; });
   const s = r2.width / r1.width;
   const rFrom = to === 'browse' ? 20 : r1.width / 2, rTo = to === 'browse' ? r2.width / 2 / s : 20 / s;
   const anim = g.animate([
     { transform: 'translate(0,0) scale(1)', borderRadius: `${rFrom}px` },
     { transform: `translate(${r2.left - r1.left}px,${r2.top - r1.top}px) scale(${s})`, borderRadius: `${rTo}px` },
   ], { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
-  const done = () => { g.remove(); hide.style.visibility = ''; };
+  const done = () => { g.remove(); hide.forEach((h) => { h.style.visibility = ''; }); };
   anim.onfinish = done; anim.oncancel = done;
 }
 function toStage() {
@@ -327,9 +328,11 @@ async function removeSelected() {
   try {
     if (kind === 'liked') {
       for (const x of tracks) { await api.setLiked(x, false); state.liked.delete(x.id); }
+      await dropAutoDl('liked', tracks);
     } else if (kind === 'local') {
       // shown positions shift as songs go: remove from the bottom up
       for (const i of [...sel].sort((a, b) => b - a)) await api.removeFromPlaylist(pageCtx.id, i);
+      await dropAutoDl(`local:${pageCtx.id}`, tracks);
     } else if (kind === 'downloads') {
       for (const x of tracks) await api.deleteDownload(x.id);
     }
@@ -892,7 +895,7 @@ function trackMenu(x, ctx, idx, px, py) {
   items.push({ label: t('menu.copy'), run: () => { navigator.clipboard.writeText(`https://music.youtube.com/watch?v=${x.id}`).then(() => toast(t('toast.copied')), () => {}); } });
   if (ctx?.kind === 'local') {
     items.push('-', { label: t('menu.removeFromPlaylist'), run: async () => {
-      await api.removeFromPlaylist(ctx.id, idx); await refreshLibrary(); render();
+      await api.removeFromPlaylist(ctx.id, idx); await dropAutoDl(`local:${ctx.id}`, [x]); await refreshLibrary(); render();
     } });
   }
   showMenu(px, py, items);
@@ -905,6 +908,7 @@ async function toggleLike(x) {
     await api.setLiked(x, liked);
     liked ? state.liked.add(x.id) : state.liked.delete(x.id);
     if (liked && autoDl.has('liked')) downloadTracks([x], true);
+    if (!liked) dropAutoDl('liked', [x]);
     $$(`.trow[data-tid="${CSS.escape(x.id)}"] .like`).forEach((b) => {
       b.classList.toggle('on', liked); b.setAttribute('aria-pressed', liked); b.innerHTML = icon(liked ? 'heart-fill' : 'heart');
     });
@@ -960,6 +964,16 @@ function updateDlButtons() {
   chip.querySelector('span').textContent = label;
 }
 
+/** Songs left a collection marked for download (unliked, removed from the playlist): their
+ *  offline copies came from it, so they go too. */
+async function dropAutoDl(key, tracks) {
+  if (!autoDl.has(key)) return;
+  const had = tracks.filter((x) => state.downloaded.has(x.id));
+  for (const x of had) {
+    try { await api.deleteDownload(x.id); state.downloaded.delete(x.id); } catch { /* keep it */ }
+  }
+  if (had.length) { renderDock(); updateDlButtons(); }
+}
 async function deleteDownload(x) {
   await api.deleteDownload(x.id);
   state.downloaded.delete(x.id);
@@ -1691,6 +1705,7 @@ function swipe(el, dir, fn) {
   });
 }
 swipe($('.stage-art-wrap'), 1, () => actions['to-browse']());
+$('.stage-art-wrap').addEventListener('click', () => actions['to-browse']());
 swipe($('#capsule'), -1, toStage);
 
 player.on('track', () => { updateNowPlaying(); renderSide(); if (mode() === 'browse') updateState(); });

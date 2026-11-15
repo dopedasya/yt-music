@@ -34,7 +34,6 @@ A fast, unofficial YouTube Music client for Windows, macOS, Linux and Android, w
 - Time-synced lyrics (the current line lights up, click a line to jump), from [LRCLIB](https://lrclib.net) with YouTube Music lyrics as fallback
 - 10-band equalizer with presets
 - 18+ songs play when you're signed in (age-verified account)
-- On Windows, macOS and Linux, signed-in playback goes through YouTube Music's own web player: songs start at once and don't stop half-way
 
 **Library**
 - Sidebar with your library and playlists, always at hand
@@ -104,13 +103,12 @@ src-tauri/src/
   recommend.rs      "made for you" mixes from your history and likes
   color.rs          dominant cover colour for tints
   auth.rs / account.rs   "Sign in with Google", account name and avatar
-  webplayer.rs      desktop: YouTube Music's web player in a hidden window, driven from Rust
   media.rs          Windows media overlay (system media controls)
   db.rs             SQLite: likes, playlists, history, downloads, cache, settings
 ```
 
 - **Metadata** (search, albums, artists, charts, radio, account) comes from [rustypipe](https://codeberg.org/ThetaDev/rustypipe).
-- **Audio on desktop:** once you're signed in, songs play through YouTube Music's own web player in a hidden window (`webplayer.rs`): our interface drives it and shows its state. Songs start at once, 18+ songs play, and YouTube shows its ads as on the site. Guests, downloaded songs and the fallback (if the site doesn't start a song) use the built-in player below, with [yt-dlp](https://github.com/yt-dlp/yt-dlp) resolving the streams.
+- **Audio on desktop:** every song goes through [yt-dlp](https://github.com/yt-dlp/yt-dlp), signed in with your session when you're logged in, so 18+ songs play too. The fast built-in resolvers start a song, and the yt-dlp URL for the same format takes over in the background.
 - **Audio on Android** (no yt-dlp): a direct InnerTube `player` request with the visionOS client races rustypipe. For 18+ songs the app makes a signed request and solves the stream URL challenges with yt-dlp's own solver ([yt-dlp/ejs](https://github.com/yt-dlp/ejs), Unlicense) running in the webview's JS engine; the parsed player is cached on disk.
 - googlevideo rejects open-ended ranges, so the local proxy fetches upstream in bounded 4 MB chunks and stitches them into one stream. Seeking works, and stream URLs never reach the web layer.
 
@@ -119,7 +117,6 @@ src-tauri/src/
 ```sh
 cargo test                            # offline tests
 cargo test -- --ignored --nocapture   # live tests against real YouTube
-node tests/player.test.mjs            # player engine switching (UI, fake backend)
 ```
 
 ## Keyboard shortcuts

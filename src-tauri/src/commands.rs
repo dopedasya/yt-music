@@ -421,11 +421,6 @@ pub async fn get_settings(core: St<'_>) -> Res<Settings> {
         discord_available: false,
         global_hotkeys: crate::integrations::enabled(&core, "global_hotkeys"),
         hotkeys_supported: cfg!(desktop),
-        #[cfg(desktop)]
-        web_player: crate::webplayer::enabled(&core),
-        #[cfg(mobile)]
-        web_player: false,
-        web_player_supported: cfg!(desktop),
     })
 }
 
@@ -473,11 +468,6 @@ pub async fn refresh_account(core: St<'_>) -> Res<()> {
 
 #[tauri::command]
 pub async fn logout(app: tauri::AppHandle, core: St<'_>) -> Res<()> {
-    #[cfg(desktop)]
-    {
-        crate::webplayer::sign_out(&app).await;
-        let _ = core.db.del_setting(crate::webplayer::WEB_LOGIN);
-    }
     let _ = &app;
     forget_account(&core).await
 }

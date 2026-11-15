@@ -631,11 +631,6 @@ const views = {
         <div class="row"><input id="dl-dir" class="text-in" value="${esc(s.download_dir)}" spellcheck="false" aria-label="${esc(t('set.dlDirHint'))}">
           <button class="pill-btn" data-act="save-dl-dir">${esc(t('set.save'))}</button></div>
       </section>
-      ${s.web_player_supported ? `<section class="set-block">
-        <h2>${esc(t('eng.title'))}</h2>
-        <label class="check"><input type="checkbox" id="web-player" ${s.web_player ? 'checked' : ''}> ${esc(t('eng.web'))}</label>
-        <p class="muted small">${esc(t('eng.hint'))}</p>
-      </section>` : ''}
       <section class="set-block">
         <h2>${esc(t('int.title'))}</h2>
         <label class="check"><input type="checkbox" data-toggle="notify_tracks" ${s.notify_tracks ? 'checked' : ''}> ${esc(t('int.notify'))}</label>
@@ -675,10 +670,6 @@ const afterRender = {
       if (f) $('#cookie-text').value = await f.text();
     });
     $('#autoplay')?.addEventListener('change', (e) => player.setAutoplay(e.target.checked));
-    $('#web-player')?.addEventListener('change', async (e) => {
-      try { await player.setWebEngine(e.target.checked); state.settings = await api.settings(); } catch (err) { toast(errText(err), 'err'); }
-      render();
-    });
     $$('input[data-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       try {
         await api.setToggle(cb.dataset.toggle, cb.checked);
@@ -1037,7 +1028,6 @@ async function playCollection(kind, id) {
 }
 
 async function logout() {
-  player.suspend();
   await api.logout();
   state.settings = await api.settings();
   state.remotePlaylists = [];
@@ -1113,7 +1103,6 @@ const actions = {
     if (el.closest('.set-block')) { el.disabled = true; el.querySelector('span').textContent = t('set.googleWaiting'); }
     // Android: native sign-in screen (LoginActivity); it calls window.__androidLogin back.
     if (window.AndroidAuth) { window.AndroidAuth.login(); return; }
-    player.suspend();
     try { await api.googleLogin(); } catch (e) { toast(errText(e), 'err'); if (mode() === 'browse') render(); }
   },
   'switch-account': async () => {
@@ -1521,7 +1510,7 @@ function updateTime() {
     cs.setAttribute('aria-valuetext', `${fmt(c)} / ${fmt(dur)}`);
   }
   const cur = player.current;
-  if (cur) { const sub = $('#cap-sub'), names = player.ad ? t('pl.ad') : artistNames(cur.artists); if (sub.textContent !== names) sub.textContent = names; sub.title = `${fmt(c)} / ${fmt(dur)}`; }
+  if (cur) { const sub = $('#cap-sub'), names = artistNames(cur.artists); if (sub.textContent !== names) sub.textContent = names; sub.title = `${fmt(c)} / ${fmt(dur)}`; }
   if ('mediaSession' in navigator && isFinite(d) && d > 0) {
     try { navigator.mediaSession.setPositionState({ duration: d, position: Math.min(c, d), playbackRate: 1 }); } catch { /* ignore */ }
   }
@@ -1879,14 +1868,6 @@ listen('google-login', async (r) => {
   }
   if (nav.stack[nav.pos]?.view === 'settings') render();
 });
-// One time after an update: the old sign-in did not cover the web player (webplayer.rs).
-listen('signed-out', async () => {
-  state.settings = await api.settings();
-  state.remotePlaylists = [];
-  renderAccount(); renderDock();
-  if (mode() === 'browse') render();
-  toast(t('eng.signInAgain'));
-});
 listen('youtube-like-failed', (title) => toast(t('toast.ytLikeFail', { title }), 'err'));
 listen('google-login-closed', () => { if (nav.stack[nav.pos]?.view === 'settings') render(); });
 // Android sign-in result: the YouTube cookies from LoginActivity (null if cancelled).
@@ -1907,7 +1888,7 @@ window.__androidLogin = async (cookie) => {
 (async function boot() {
   translateDom();
   hydrateIcons();
-  eq.init(player.element);
+  eq.init(player.audio);
   await initApi();
   state.settings = await api.settings().catch(() => ({}));
   renderAccount();

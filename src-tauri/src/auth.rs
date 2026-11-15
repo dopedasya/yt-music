@@ -36,9 +36,6 @@ struct LoginResult {
 
 fn done(app: &AppHandle, ok: bool, error: Option<String>) {
     let _ = app.emit("google-login", LoginResult { ok, error });
-    // Signed in through the web player window (desktop): it stays, hidden, with the session.
-    #[cfg(desktop)]
-    crate::webplayer::finish_sign_in(app);
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.close();
     }
@@ -92,12 +89,6 @@ pub(crate) async fn capture(app: AppHandle, core: Arc<Core>, label: &'static str
                 break;
             }
         };
-        // The web player window is never closed, only hidden: hidden = sign-in cancelled.
-        #[cfg(desktop)]
-        if label == crate::webplayer::LABEL && !crate::webplayer::signing_in() {
-            log(&core, "stop: sign-in window closed");
-            break;
-        }
         let names = cookies.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(",");
         if names != last_names {
             log(&core, &format!("cookie names: {names}"));
@@ -110,11 +101,6 @@ pub(crate) async fn capture(app: AppHandle, core: Arc<Core>, label: &'static str
                 Ok(()) => {
                     log(&core, "signed in");
                     let _ = core.db.set_setting("logged_in", "1");
-                    // The same sign-in covers the web player (see webplayer::migrate).
-                    #[cfg(desktop)]
-                    if label == crate::webplayer::LABEL {
-                        let _ = core.db.set_setting(crate::webplayer::WEB_LOGIN, "1");
-                    }
                     if let Err(e) = crate::commands::refresh_account_info(&core).await {
                         log(&core, &format!("account info unavailable: {e}"));
                     }
@@ -158,14 +144,6 @@ pub async fn google_login(app: AppHandle, core: State<'_, Arc<Core>>) -> Result<
 
 #[cfg(not(target_os = "ios"))]
 async fn desktop_login(app: AppHandle, core: State<'_, Arc<Core>>) -> Result<(), String> {
-    // Desktop with the web player engine: one sign-in, in the player's own window. The
-    // session stays in that webview (playback) and its cookies also go to rustypipe (library).
-    #[cfg(desktop)]
-    if crate::webplayer::enabled(&core) {
-        crate::webplayer::sign_in(&app)?;
-        tauri::async_runtime::spawn(capture(app.clone(), core.inner().clone(), crate::webplayer::LABEL));
-        return Ok(());
-    }
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.set_focus();
         return Ok(());

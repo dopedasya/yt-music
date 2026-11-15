@@ -44,15 +44,6 @@ export const api = {
   presence: (playing, position) => invoke('presence', { playing, position }),
   setToggle: (key, on) => invoke('set_toggle', { key, on }),
 
-  // Web player engine (desktop): YouTube Music's own player in a hidden webview
-  wpLoad: (id) => invoke('webplayer_load', { id }),
-  wpPlay: () => invoke('webplayer_play'),
-  wpPause: () => invoke('webplayer_pause'),
-  wpStop: () => invoke('webplayer_stop'),
-  wpSeek: (seconds) => invoke('webplayer_seek', { seconds }),
-  wpVolume: (volume, muted) => invoke('webplayer_volume', { volume, muted }),
-  wpEnable: (on) => invoke('webplayer_enable', { on }),
-
   // Library
   likedTracks: () => invoke('liked_tracks'),
   likedIds: () => invoke('liked_ids'),

@@ -9,7 +9,7 @@ pub struct Db {
     conn: Mutex<Connection>,
 }
 
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -30,6 +30,8 @@ impl Db {
             PRAGMA foreign_keys = ON;
             CREATE TABLE IF NOT EXISTS tracks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS likes (track_id TEXT PRIMARY KEY, ts INTEGER NOT NULL);
+            -- unliked here while still liked on YouTube: the sync must not bring them back
+            CREATE TABLE IF NOT EXISTS unliked (track_id TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS playlists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -54,8 +56,12 @@ impl Db {
                 ts INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts INTEGER NOT NULL);
             "#,
         )?;
+        // v0.3: audio quality of downloads. ALTER fails harmlessly if the column exists.
+        let _ = conn.execute("ALTER TABLE downloads ADD COLUMN codec TEXT", []);
+        let _ = conn.execute("ALTER TABLE downloads ADD COLUMN kbps INTEGER", []);
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -88,8 +94,10 @@ impl Db {
                 "INSERT OR IGNORE INTO likes(track_id, ts) VALUES (?1, ?2)",
                 params![t.id, now()],
             )?;
+            conn.execute("DELETE FROM unliked WHERE track_id = ?1", [&t.id])?;
         } else {
             conn.execute("DELETE FROM likes WHERE track_id = ?1", [&t.id])?;
+            conn.execute("INSERT OR IGNORE INTO unliked(track_id) VALUES (?1)", [&t.id])?;
         }
         Ok(())
     }
@@ -103,7 +111,8 @@ impl Db {
         for (i, t) in tracks.iter().rev().enumerate() {
             Self::upsert_track(&tx, t)?;
             added += tx.execute(
-                "INSERT OR IGNORE INTO likes(track_id, ts) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO likes(track_id, ts) SELECT ?1, ?2
+                 WHERE NOT EXISTS (SELECT 1 FROM unliked WHERE track_id = ?1)",
                 params![t.id, base + i as i64],
             )?;
         }
@@ -240,6 +249,35 @@ impl Db {
         Ok(())
     }
 
+    /// Most played tracks since `since_ms`, with play counts (taste signal for recommendations).
+    pub fn top_played(&self, since_ms: i64, limit: usize) -> Result<Vec<(Track, u32)>> {
+        let conn = self.c();
+        let mut st = conn.prepare(
+            "SELECT t.data, COUNT(*) AS c FROM history h JOIN tracks t ON t.id = h.track_id
+             WHERE h.ts >= ?1 GROUP BY h.track_id ORDER BY c DESC, MAX(h.ts) DESC LIMIT ?2",
+        )?;
+        let rows = st.query_map(params![since_ms, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))?;
+        Ok(rows.filter_map(|r| r.ok()).filter_map(|(d, c)| Some((track_from_json(d)?, c))).collect())
+    }
+
+    /// A random handful of liked tracks.
+    pub fn liked_sample(&self, limit: usize) -> Result<Vec<Track>> {
+        self.tracks_query(
+            "SELECT t.data FROM likes l JOIN tracks t ON t.id = l.track_id ORDER BY RANDOM() LIMIT ?1",
+            [limit as i64],
+        )
+    }
+
+    /// Liked tracks that haven't been played since `since_ms` ("rediscover").
+    pub fn liked_not_played_since(&self, since_ms: i64, limit: usize) -> Result<Vec<Track>> {
+        self.tracks_query(
+            "SELECT t.data FROM likes l JOIN tracks t ON t.id = l.track_id
+             WHERE NOT EXISTS (SELECT 1 FROM history h WHERE h.track_id = l.track_id AND h.ts >= ?1)
+             ORDER BY RANDOM() LIMIT ?2",
+            params![since_ms, limit as i64],
+        )
+    }
+
     pub fn history(&self, limit: usize) -> Result<Vec<Track>> {
         self.tracks_query(
             "SELECT t.data FROM history h JOIN tracks t ON t.id = h.track_id ORDER BY h.id DESC LIMIT ?1",
@@ -248,12 +286,47 @@ impl Db {
     }
 
     // ---- downloads
-    pub fn add_download(&self, t: &Track, path: &str, size: u64) -> Result<()> {
+    pub fn add_download(&self, t: &Track, path: &str, size: u64, codec: &str, kbps: Option<u32>) -> Result<()> {
         let conn = self.c();
         Self::upsert_track(&conn, t)?;
         conn.execute(
-            "INSERT OR REPLACE INTO downloads(track_id, path, size, ts) VALUES (?1, ?2, ?3, ?4)",
-            params![t.id, path, size as i64, now()],
+            "INSERT OR REPLACE INTO downloads(track_id, path, size, ts, codec, kbps) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![t.id, path, size as i64, now(), codec, kbps],
+        )?;
+        Ok(())
+    }
+
+    /// Quality of a downloaded file: (codec, kbps).
+    pub fn download_quality(&self, id: &str) -> Option<(Option<String>, Option<u32>)> {
+        self.c()
+            .query_row("SELECT codec, kbps FROM downloads WHERE track_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    // ---- cache (cover colours, lyrics): small JSON values keyed by string
+    pub fn cache_get(&self, key: &str) -> Option<String> {
+        self.c()
+            .query_row("SELECT value FROM cache WHERE key = ?1", [key], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn cache_put(&self, key: &str, value: &str) -> Result<()> {
+        self.c().execute(
+            "INSERT OR REPLACE INTO cache(key, value, ts) VALUES (?1, ?2, ?3)",
+            params![key, value, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Drop cached entries whose key starts with `prefix` and that are older than `max_age_ms`.
+    pub fn cache_prune(&self, prefix: &str, max_age_ms: i64) -> Result<()> {
+        self.c().execute(
+            "DELETE FROM cache WHERE substr(key, 1, length(?1)) = ?1 AND ts < ?2",
+            params![prefix, now() - max_age_ms],
         )?;
         Ok(())
     }
@@ -275,7 +348,7 @@ impl Db {
     pub fn downloads(&self) -> Result<Vec<DownloadEntry>> {
         let conn = self.c();
         let mut st = conn.prepare(
-            "SELECT t.data, d.path, d.size, d.ts FROM downloads d JOIN tracks t ON t.id = d.track_id
+            "SELECT t.data, d.path, d.size, d.ts, d.codec, d.kbps FROM downloads d JOIN tracks t ON t.id = d.track_id
              ORDER BY d.ts DESC",
         )?;
         let rows = st.query_map([], |r| {
@@ -284,12 +357,16 @@ impl Db {
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
                 r.get::<_, i64>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<u32>>(5)?,
             ))
         })?;
         Ok(rows
             .filter_map(|r| r.ok())
-            .filter_map(|(d, path, size, ts)| {
-                Some(DownloadEntry { track: track_from_json(d)?, path, size: size as u64, ts })
+            .filter_map(|(d, path, size, ts, codec, kbps)| {
+                // Older downloads (before quality tracking) were always AAC m4a.
+                let codec = codec.or_else(|| path.ends_with(".m4a").then(|| "AAC".to_string()));
+                Some(DownloadEntry { track: track_from_json(d)?, path, size: size as u64, ts, codec, kbps })
             })
             .collect())
     }
@@ -321,5 +398,29 @@ impl Db {
     pub fn del_setting(&self, key: &str) -> Result<()> {
         self.c().execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(id: &str) -> Track {
+        Track { id: id.into(), title: id.into(), artists: vec![], album: None, duration: None, cover: None, plays: None }
+    }
+
+    #[test]
+    fn sync_does_not_bring_back_an_unlike() {
+        let dir = std::env::temp_dir().join(format!("ytubem-db-{}", now()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("t.db")).unwrap();
+        db.import_likes(&[t("a"), t("b")]).unwrap();
+        db.set_liked(&t("a"), false).unwrap();
+        db.import_likes(&[t("a"), t("b")]).unwrap(); // YouTube still has "a" liked
+        assert_eq!(db.liked_ids().unwrap(), ["b"]);
+        db.set_liked(&t("a"), true).unwrap(); // liked again here: syncs normally
+        let mut ids = db.liked_ids().unwrap();
+        ids.sort();
+        assert_eq!(ids, ["a", "b"]);
     }
 }
